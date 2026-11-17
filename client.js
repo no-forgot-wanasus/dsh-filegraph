@@ -32,19 +32,37 @@ window.__ModuleLoader__.load({
 
     /** 「操作说明」弹窗的唯一内容：快捷键 → 对应操作。只有这两列。 */
     const SHORTCUTS = [
-      ['Esc', '返回上一层 / 关闭面板'],
-      ['Shift+A', '加节点；有框选时收进节点组'],
-      ['Shift+D', '再放一个同名节点'],
-      ['Ctrl+S', '保存'],
-      ['Ctrl+Z', '回退一步'],
-      ['Shift+左键节点', '多选 / 取消多选'],
-      ['Shift+左键线', '改动作词'],
-      ['Ctrl+左键线', '剪掉这条关系'],
-      ['Shift+拖空白', '框选'],
-      ['拖输出端口 → 输入端口', '连一条关系'],
-      ['拖节点 / 拖空白', '摆位置 / 平移'],
-      ['滚轮', '缩放'],
-      ['右键 节点/线/空白', '节点菜单 / 关系菜单 / 添加菜单'],
+      // 左键 / 拖动
+      ['左键点节点', '选中，右侧看详情'],
+      ['左键点空白', '取消选中，收起菜单'],
+      ['左键拖节点', '摆位置'],
+      ['左键拖空白', '平移画布'],
+      ['左键拖输出端口 → 输入端口', '连一条关系'],
+      ['左键拖过线', '什么都不做（剪线要按 Ctrl）'],
+      // 组合键
+      ['Shift + 左键点节点', '多选 / 取消多选'],
+      ['Shift + 左键点线', '改动作词'],
+      ['Shift + 左键拖空白', '框选'],
+      ['Shift + A', '加节点；有框选时收进节点组'],
+      ['Shift + D', '再放一个同名节点'],
+      ['Ctrl + 左键拖过线', '剪掉划过的关系'],
+      ['Ctrl + 左键点线', '剪掉这一条关系'],
+      ['Ctrl + S', '保存'],
+      ['Ctrl + Z', '回退一步'],
+      ['Esc', '关弹窗 / 退出节点组 / 关面板'],
+      // 右键
+      ['右键节点', '打开节点组 / 解散 / 重命名 / 删除 / 再放同名'],
+      ['右键组输入·组输出', '每个关系一个端口'],
+      ['右键线', '改动作词 / 删除这条关系'],
+      ['右键端口名', '重命名端口 / 删除端口'],
+      ['右键空白', '添加节点 / 添加节点组 / 退出节点组'],
+      // 其它
+      ['左键拖端口到节点框上', '连一条关系'],
+      ['滚轮', '缩放（不设上限）'],
+      ['文件 ▾', '新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档'],
+      ['关系 ▾', '关系 / 全部 / 此节点关系 / 此节点链路'],
+      ['⋯', '加节点 / 加节点组 / 再放同名 / 设置 / 清空这张图'],
+      ['左上角路径', '回到上一层节点组'],
     ]
 
     /* ------------------------------------------------------ 极简 store */
@@ -78,7 +96,6 @@ window.__ModuleLoader__.load({
       addProject: false,
       draftRoot: '',
       nodePos: {},
-      drags: {},
       draggingIds: [],
       viewport: null,
       viewMode: 'flow',
@@ -133,7 +150,6 @@ window.__ModuleLoader__.load({
           nextPos[id] = pos
         }
         state.nodePos = nextPos
-        state.drags = (json && json.drags) || {}
         state.nodeNotes = (json && json.nodeNotes) || {}
         if (state.selected) {
           const ids = new Set()
@@ -195,7 +211,7 @@ window.__ModuleLoader__.load({
     }
     async function savePath() {
       try {
-        await postJson(SETTINGS_URL, { graphFile: state.draft ?? '' })
+        await postJson(SETTINGS_URL, { graphFile: state.draft ?? '', undoDepth: state.undoDraft })
         state.showSettings = false
         await load(undefined)
         state.notice =
@@ -244,33 +260,40 @@ window.__ModuleLoader__.load({
         notify()
       }
     }
-    async function moveNodes(entries, asDelta) {
+    /** 拖完直接写绝对坐标（位置只存一份）；先本地生效，宿主那边记内存、按保存/退出/3分钟落盘。 */
+    async function moveNodes(entries, forFiles) {
       if (!entries || Object.keys(entries).length === 0) return
       const merged = { ...state.nodePos }
       for (const [id, pos] of Object.entries(entries)) merged[id] = pos
       state.nodePos = merged
       state.draggingIds = []
+      // 「全部」视图的文件/窗口层：位置照旧走 /filegraph/position
+      if (forFiles) {
+        const positions = {}
+        for (const [id, pos] of Object.entries(entries)) positions[id] = { x: Math.round(pos.x), y: Math.round(pos.y) }
+        try {
+          await postJson(POSITION_URL, { root: activeRoot(), positions })
+        } catch (error) {
+          state.error = String((error && error.message) || error)
+          notify()
+        }
+        notify()
+        return
+      }
+      const list = []
+      const local = { ...((state.data && state.data.flowPositions) || {}) }
+      for (const [canvasId, pos] of Object.entries(entries)) {
+        const nodeId = canvasId.indexOf('f:') === 0 ? canvasId.slice(2) : canvasId
+        const next = { x: Math.round(pos.x), y: Math.round(pos.y) }
+        list.push({ id: nodeId, x: next.x, y: next.y })
+        local[nodeId] = next
+      }
+      // 换一个新的 data 对象：useMemo 靠引用判断，原地改 flowPositions 不会触发重算，
+      // 松手后节点会弹回旧位置（"拖不动"）。
+      if (state.data) state.data = { ...state.data, flowPositions: local }
       notify()
       try {
-        const flowBase = (state.data && state.data.flowPositions) || {}
-        const deltas = []
-        const absolutes = []
-        for (const [canvasId, pos] of Object.entries(entries)) {
-          const nodeId = canvasId.indexOf('f:') === 0 ? canvasId.slice(2) : canvasId
-          const base = flowBase[nodeId]
-          if (base) deltas.push({ id: nodeId, dx: Math.round(pos.x - base.x), dy: Math.round(pos.y - base.y) })
-          else absolutes.push({ nodeId, x: Math.round(pos.x), y: Math.round(pos.y) })
-        }
-        if (deltas.length > 0) {
-          const next = { ...(state.drags || {}) }
-          for (const item of deltas) next[item.id] = { dx: item.dx, dy: item.dy }
-          state.drags = next
-          notify()
-          await postJson(DRAG_URL, { entries: deltas })
-        }
-        if (absolutes.length > 0) {
-          await postJson(POSITION_URL, { root: activeRoot(), positions: Object.fromEntries(absolutes.map((item) => [item.nodeId, { x: item.x, y: item.y }])) })
-        }
+        await postJson(DRAG_URL, { entries: list })
       } catch (error) {
         state.error = String((error && error.message) || error)
         notify()
@@ -298,13 +321,29 @@ window.__ModuleLoader__.load({
         notify()
       }
     }
+    /** 路径没写后缀就补上（'use' → 'use.drawio'）：存出来的文件要能在「打开」框里找回来。 */
+    function withExt(target, ext) {
+      const name = String(target).split(/[\\/]/).pop() || ''
+      if (name.indexOf('.') > 0) return target
+      return target + ext
+    }
+
+    /** 新建的默认路径：跟当前图同目录、换个名字，带 .drawio，不会一按就把现有图覆盖掉。 */
+    function defaultNewDrawioPath() {
+      const cur = String((state.data && state.data.settings && state.data.settings.drawioFile) || '').trim()
+      const root = String((state.data && state.data.active && state.data.active.root) || '').trim()
+      const dir = cur ? cur.replace(/[\\/][^\\/]*$/, '') : root
+      return (dir ? dir + '\\' : '') + '新建关系图.drawio'
+    }
+
     async function runFileAction(mode, path) {
-      const target = String(path || '').trim()
-      if (!target) {
+      const raw = String(path || '').trim()
+      if (!raw) {
         state.error = '先填文件路径'
         notify()
         return
       }
+      const target = withExt(raw, mode === 'md' ? '.md' : '.drawio')
       try {
         let opened = null
         if (mode === 'md') {
@@ -1296,7 +1335,39 @@ window.__ModuleLoader__.load({
       return { x: side === 'in' ? pos.x : pos.x + m.w, y: pos.y + FLOW_HEAD + 6 + index * FLOW_ROW + FLOW_ROW / 2 }
     }
 
-    function FlowCanvas({ nodes, edges, positions, selected, picked, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
+    /**
+     * 一根线一个端口：多端口节点（节点组 / 组输入 / 组输出）上，同一个口被几条线共用时，
+     * 按出现顺序把它们摊到不同端口 —— 旧数据没存端口的也能立刻显示成"分开的"。
+     */
+    function spreadPorts(flows, kindOf) {
+      const kindOfNode = (id) => kindOf.get(id) || ''
+      const multiOut = (id) => kindOfNode(id) === 'group' || kindOfNode(id) === 'input'
+      const multiIn = (id) => kindOfNode(id) === 'group' || kindOfNode(id) === 'output'
+      const usedOut = new Map()
+      const usedIn = new Map()
+      const take = (map, id, want) => {
+        const used = map.get(id) || new Set()
+        let port = Math.max(0, Number(want) || 0)
+        if (used.has(port)) {
+          port = 0
+          while (used.has(port)) port += 1
+        }
+        used.add(port)
+        map.set(id, used)
+        return port
+      }
+      return (flows || []).map((flow) => ({
+        id: flow.id,
+        from: 'f:' + flow.fromId,
+        to: 'f:' + flow.toId,
+        fromPort: multiOut(flow.fromId) ? take(usedOut, flow.fromId, flow.fromPort) : (flow.fromPort || 0),
+        toPort: multiIn(flow.toId) ? take(usedIn, flow.toId, flow.toPort) : (flow.toPort || 0),
+        verb: flow.verb || '',
+        kind: 'verb',
+      }))
+    }
+
+    function FlowCanvas({ nodes, edges, positions, selected, picked, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onCut, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
       const svgRef = useRef(null)
       const [view, setView] = useState({ k: 1, dx: 0, dy: 0 })
       const viewRef = useRef(view)
@@ -1307,6 +1378,7 @@ window.__ModuleLoader__.load({
       const movedRef = useRef(false)
       const boxRef = useRef({ key: '', x: 0, y: 0, w: 0, h: 0 })
       const marqueeRef = useRef(null)
+      const scissorRef = useRef(null)
 
       const posOf = useCallback((id) => {
         if (live && live[id]) return live[id]
@@ -1447,6 +1519,16 @@ window.__ModuleLoader__.load({
             }
             return
           }
+          if (drag.mode === 'scissor') {
+            drag.ex = lx
+            drag.ey = ly
+            const cut = scissorRef.current
+            if (cut) {
+              cut.setAttribute('x2', String(lx))
+              cut.setAttribute('y2', String(ly))
+            }
+            return
+          }
           if (drag.mode === 'node') {
             const scale = scaleOf()
             const k = viewRef.current.k || 1
@@ -1480,6 +1562,18 @@ window.__ModuleLoader__.load({
             if (onPick) onPick(ids)
             return
           }
+          if (drag.mode === 'scissor') {
+            const cut = scissorRef.current
+            if (cut) cut.style.opacity = '0'
+            if (svgRef.current) svgRef.current.style.cursor = 'grab'
+            const point = localOf(event)
+            const list = cutPath({ x: drag.sx, y: drag.sy }, { x: point.x, y: point.y })
+            if (list.length > 0) {
+              if (onCut) onCut(list)
+              else if (onCutEdge) list.forEach((edge) => onCutEdge(edge))
+            }
+            return
+          }
           if (drag.mode === 'link') {
             const target = link && link.target
             setLink(null)
@@ -1506,7 +1600,7 @@ window.__ModuleLoader__.load({
         }
       })
 
-      const edgePath = (edge) => {
+      const edgeLine = (edge) => {
         const from = nodes.find((node) => node.id === edge.from)
         const to = nodes.find((node) => node.id === edge.to)
         if (!from || !to) return null
@@ -1516,12 +1610,44 @@ window.__ModuleLoader__.load({
         const a = flowPortPos(from, fp, 'out', edge.fromPort || 0)
         const b = flowPortPos(to, tp, 'in', edge.toPort || 0)
         if (edge.from === edge.to) {
-          const d = 'M' + a.x + ' ' + a.y + ' C' + (a.x + 70) + ' ' + (a.y - 46) + ', ' + (b.x - 70) + ' ' + (b.y - 46) + ', ' + b.x + ' ' + b.y
-          return { d, mx: (a.x + b.x) / 2, my: Math.min(a.y, b.y) - 40 }
+          const c1 = { x: a.x + 70, y: a.y - 46 }
+          const c2 = { x: b.x - 70, y: b.y - 46 }
+          return { a, c1, c2, b, d: 'M' + a.x + ' ' + a.y + ' C' + c1.x + ' ' + c1.y + ', ' + c2.x + ' ' + c2.y + ', ' + b.x + ' ' + b.y, mx: (a.x + b.x) / 2, my: Math.min(a.y, b.y) - 40 }
         }
         const bend = Math.max(40, Math.abs(b.x - a.x) * 0.45)
-        const d = 'M' + a.x + ' ' + a.y + ' C' + (a.x + bend) + ' ' + a.y + ', ' + (b.x - bend) + ' ' + b.y + ', ' + b.x + ' ' + b.y
-        return { d, mx: (a.x + b.x) / 2 + (bend - Math.abs(b.x - a.x) * 0.45) / 2, my: (a.y + b.y) / 2 }
+        const c1 = { x: a.x + bend, y: a.y }
+        const c2 = { x: b.x - bend, y: b.y }
+        const d = 'M' + a.x + ' ' + a.y + ' C' + c1.x + ' ' + c1.y + ', ' + c2.x + ' ' + c2.y + ', ' + b.x + ' ' + b.y
+        return { a, c1, c2, b, d, mx: (a.x + b.x) / 2 + (bend - Math.abs(b.x - a.x) * 0.45) / 2, my: (a.y + b.y) / 2 }
+      }
+      const edgePath = (edge) => edgeLine(edge)
+
+      // 剪刀：Ctrl + 拖过线，松手把划过的线一起剪掉。
+      const cutPath = (from, to) => {
+        const k = (viewRef.current && viewRef.current.k) || 1
+        const near = 7 / k
+        const hit = []
+        for (const edge of edges) {
+          const line = edgeLine(edge)
+          if (!line) continue
+          let crossed = false
+          for (let i = 0; i <= 24 && !crossed; i += 1) {
+            const t0 = i / 24
+            const t1 = (i + 1) / 24
+            const p0 = bezierAt(line, t0)
+            const p1 = bezierAt(line, t1)
+            if (segmentsCross(from, to, p0, p1) || pointSegDistance(p0, from, to) < near) crossed = true
+          }
+          if (crossed) hit.push(edge)
+        }
+        return hit
+      }
+      const bezierAt = (line, t) => {
+        const u = 1 - t
+        return {
+          x: u * u * u * line.a.x + 3 * u * u * t * line.c1.x + 3 * u * t * t * line.c2.x + t * t * t * line.b.x,
+          y: u * u * u * line.a.y + 3 * u * u * t * line.c1.y + 3 * u * t * t * line.c2.y + t * t * t * line.b.y,
+        }
       }
 
       const nodeById = new Map(nodes.map((node) => [node.id, node]))
@@ -1539,6 +1665,21 @@ window.__ModuleLoader__.load({
               if (event.button === 2) return
               if (event.target !== event.currentTarget) return
               try { event.currentTarget.setPointerCapture(event.pointerId) } catch {}
+              if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
+                // Ctrl + 拖过线 = 剪刀：松手时把划过的线一起剪掉
+                const point = localOf(event)
+                dragRef.current = { mode: 'scissor', sx: point.x, sy: point.y, ex: point.x, ey: point.y }
+                const cut = scissorRef.current
+                if (cut) {
+                  cut.setAttribute('x1', String(point.x))
+                  cut.setAttribute('y1', String(point.y))
+                  cut.setAttribute('x2', String(point.x))
+                  cut.setAttribute('y2', String(point.y))
+                  cut.style.opacity = '1'
+                }
+                if (svgRef.current) svgRef.current.style.cursor = 'crosshair'
+                return
+              }
               if (event.shiftKey && !event.ctrlKey) {
                 // Shift + 拖空白 = 框选（框选完按 Shift+A 收进节点组）
                 const point = localOf(event)
@@ -1566,6 +1707,8 @@ window.__ModuleLoader__.load({
             onPointerUp: () => {},
             onContextMenu: (event) => {
               if (event.target !== event.currentTarget) return
+              // 别再往上冒：面板容器上的「空白右键收起菜单」会把刚打开的菜单立刻关掉
+              event.stopPropagation()
               event.preventDefault()
               if (onContextBlank) onContextBlank(event.clientX, event.clientY)
             },
@@ -1588,6 +1731,12 @@ window.__ModuleLoader__.load({
               strokeDasharray: '6 4',
               style: { opacity: 0, pointerEvents: 'none' },
             }),
+            h('line', {
+              ref: scissorRef,
+              x1: 0, y1: 0, x2: 0, y2: 0,
+              stroke: '#ef4444', strokeWidth: 1.4, strokeDasharray: '3 3',
+              style: { opacity: 0, pointerEvents: 'none' },
+            }),
             edges.map((edge) => {
               const path = edgePath(edge)
               if (!path) return null
@@ -1598,8 +1747,20 @@ window.__ModuleLoader__.load({
                   onPointerDown: (event) => {
                     event.stopPropagation()
                     if (event.shiftKey && onRenameEdge) onRenameEdge(edge)
-                    else if (event.ctrlKey && onCutEdge) onCutEdge(edge)
-                    else {
+                    else if (event.ctrlKey || event.metaKey) {
+                      // 剪刀：按下的这条线算起点，拖过的线松手一起剪
+                      const point = localOf(event)
+                      dragRef.current = { mode: 'scissor', sx: point.x, sy: point.y, ex: point.x, ey: point.y }
+                      const cut = scissorRef.current
+                      if (cut) {
+                        cut.setAttribute('x1', String(point.x))
+                        cut.setAttribute('y1', String(point.y))
+                        cut.setAttribute('x2', String(point.x))
+                        cut.setAttribute('y2', String(point.y))
+                        cut.style.opacity = '1'
+                      }
+                      if (svgRef.current) svgRef.current.style.cursor = 'crosshair'
+                    } else {
                       if (onSelect) onSelect(null)
                       if (onPick) onPick([])
                     }
@@ -2049,7 +2210,7 @@ window.__ModuleLoader__.load({
 
     /* --------------------------------------------------- 设置条 */
 
-    function SettingsBar({ data, draft, onChange, onSave, onCancel }) {
+    function SettingsBar({ data, draft, onChange, undoDraft, onUndoChange, onSave, onCancel }) {
       return h('div',
         {
           style: { padding: '10px 16px', borderTop: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', },
@@ -2063,16 +2224,36 @@ window.__ModuleLoader__.load({
           spellCheck: false,
           style: { flex: 1, minWidth: 260, height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', },
         }),
+        h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '可回退步数'),
+        h('input', {
+          type: 'number',
+          min: 10,
+          max: 1000,
+          value: undoDraft,
+          onChange: (event) => onUndoChange(event.target.value),
+          style: { width: 78, height: 28, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', },
+        }),
         h('button', { onClick: onSave, style: primaryButton }, '保存'),
         h('button', { onClick: onCancel, style: ghostButton }, '取消'),
         h('div',
           { style: { width: '100%', fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } },
-          '当前：' + ((data && data.active && data.active.graphFile) || '还没有记录'),
+          '当前：' + ((data && data.active && data.active.graphFile) || '还没有记录') +
+            '　·　回退 10~1000 步，默认 30',
         ),
       )
     }
 
     /* --------------------------------------------------------- 面板 */
+
+    /** 文件对话框的确认按钮：跟着动作走（新建就是「新建」，不能写「打开」）。 */
+    const PICK_LABEL = {
+      open: '打开',
+      reload: '打开',
+      new: '新建',
+      saveas: '另存为',
+      copy: '保存副本',
+      md: '导出',
+    }
 
     /** Blender 风格的文件浏览：上一级 + 子目录/.drawio 列表 + 路径框 + 打开/取消。 */
     function FileBrowser(props) {
@@ -2144,13 +2325,13 @@ window.__ModuleLoader__.load({
           spellCheck: false,
           onChange: (event) => setDraft(event.target.value),
           onKeyDown: (event) => {
-            if (event.key === 'Enter' && draft.trim()) props.onPick(draft.trim())
+            if (event.key === 'Enter' && draft.trim()) props.onPick(withExt(draft.trim(), props.mode === 'md' ? '.md' : '.drawio'))
           },
           style: { height: 26, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, fontFamily: 'ui-monospace, Consolas, monospace', },
         }),
         h('div',
           { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
-          h('button', { onClick: () => draft.trim() && props.onPick(draft.trim()), style: primaryButton }, '打开'),
+          h('button', { onClick: () => draft.trim() && props.onPick(withExt(draft.trim(), props.mode === 'md' ? '.md' : '.drawio')), style: primaryButton }, PICK_LABEL[props.mode] || '打开'),
           h('button', { onClick: props.onCancel, style: ghostButton }, '取消'),
         ),
       )
@@ -2197,6 +2378,7 @@ window.__ModuleLoader__.load({
       state.selected = null
       state.ctxMenu = null
       notify()
+      repairPortNames(id)
     }
 
     function closeGroup() {
@@ -2207,13 +2389,127 @@ window.__ModuleLoader__.load({
       notify()
     }
 
+    /** 组端口外面接的是谁：into(口) = 上一节点名，outOf(口) = 下一节点名。 */
+    function groupPortNames(groupId) {
+      const stack = state.groupStack || []
+      const at = stack.lastIndexOf(groupId)
+      const parent = at > 0 ? (((state.data && state.data.groups) || {})[stack[at - 1]] || null) : null
+      const flows = (parent ? parent.flows : (state.data && state.data.flows)) || []
+      const nodes = (parent ? parent.nodes : (state.data && state.data.flowNodes)) || []
+      const nameOf = (id) => {
+        const hit = nodes.find((node) => node.id === id)
+        return (hit && hit.name) || ''
+      }
+      const at0 = (value) => Math.max(0, Number(value) || 0)
+      return {
+        into: (port) => {
+          const flow = flows.find((item) => item.toId === groupId && at0(item.toPort) === port)
+          return flow ? nameOf(flow.fromId).slice(0, 60) : ''
+        },
+        outOf: (port) => {
+          const flow = flows.find((item) => item.fromId === groupId && at0(item.fromPort) === port)
+          return flow ? nameOf(flow.toId).slice(0, 60) : ''
+        },
+        /** 这个口外面有没有线接着 */
+        intoLive: (port) => flows.some((item) => item.toId === groupId && at0(item.toPort) === port),
+        outOfLive: (port) => flows.some((item) => item.fromId === groupId && at0(item.fromPort) === port),
+      }
+    }
+
+    /**
+     * 端口规则（照 use 里那张流程）：
+     * ① 没线接入 → 端口清除（内部线、外面线都没有才算没接入）；
+     * ② 输入口（线从上一级进来）→ 名字按规则变：默认名换成上一节点名（灰线功能）；
+     * ③ 输出口（线往外走）→ 默认名称（输出 / 输出 N），不拿节点名乱猜。
+     * 用户自己改过的名字一律不动。
+     */
+    function applyPortRules(groupId, draft) {
+      const names = groupPortNames(groupId)
+      const generic = (label, word) => {
+        const text = String(label == null ? '' : label).trim()
+        return text === '' || text === word || new RegExp('^' + word + ' \\d+$').test(text)
+      }
+      // 端口名
+      ;(draft.inputs || []).forEach((label, index) => {
+        if (!generic(label, '输入')) return
+        const name = names.into(index)
+        if (name) draft.inputs[index] = name
+      })
+      ;(draft.outputs || []).forEach((label, index) => {
+        if (!generic(label, '输出')) return
+        if (!String(label || '').trim()) draft.outputs[index] = '输出 ' + (index + 1)
+      })
+      // 端口清除：把没接线的口删掉，后面的关系跟着挪号
+      const prune = (which) => {
+        const sideIn = which === 'gin'
+        const list = sideIn ? draft.inputs : draft.outputs
+        if (!Array.isArray(list)) return
+        const portKey = sideIn ? 'fromPort' : 'toPort'
+        const selfKey = sideIn ? 'fromId' : 'toId'
+        const live = sideIn ? names.intoLive : names.outOfLive
+        const users = new Map()
+        for (const flow of draft.flows || []) {
+          if (flow[selfKey] !== which) continue
+          const port = Math.max(0, Number(flow[portKey]) || 0)
+          if (!users.has(port)) users.set(port, [])
+          users.get(port).push(flow)
+        }
+        const keep = []
+        const remap = new Map()
+        for (let index = 0; index < list.length; index += 1) {
+          const used = (users.get(index) || []).length > 0 || live(index)
+          if (!used) continue
+          remap.set(index, keep.length)
+          keep.push(list[index])
+        }
+        // 列表外的脏端口：有线就留到最后
+        for (const port of users.keys()) {
+          if (port < list.length) continue
+          remap.set(port, keep.length)
+          keep.push('端口 ' + (keep.length + 1))
+        }
+        // 保持 n+1：有 n 个已接入就留 n 个 + 一个空口；一个都没接入时也留一个。
+        const spare = (() => {
+          for (let index = 0; index < list.length; index += 1) {
+            if (!remap.has(index)) return list[index]
+          }
+          return ''
+        })()
+        keep.push(spare || (sideIn ? '输入 ' : '输出 ') + (keep.length + 1))
+        for (const [port, flows] of users) {
+          if (!remap.has(port)) continue
+          for (const flow of flows) flow[portKey] = remap.get(port)
+        }
+        if (sideIn) draft.inputs = keep
+        else draft.outputs = keep
+      }
+      prune('gin')
+      prune('gout')
+    }
+
+    /** 打开组时顺手跑一次端口规则：没变化就不存盘。 */
+    function repairPortNames(groupId) {
+      const def = ((state.data && state.data.groups) || {})[groupId]
+      if (!def) return
+      const draft = JSON.parse(JSON.stringify(def))
+      const before = JSON.stringify([draft.inputs || [], draft.outputs || [], draft.flows || []])
+      applyPortRules(groupId, draft)
+      if (JSON.stringify([draft.inputs || [], draft.outputs || [], draft.flows || []]) === before) return
+      editGroup(groupId, (target) => {
+        target.inputs = draft.inputs
+        target.outputs = draft.outputs
+        target.flows = draft.flows
+      })
+    }
+
     /** 改节点组内部：先本地生效（拖拽/连线手感），再整份存回宿主。 */
-    function editGroup(groupId, mutate) {
+    function editGroup(groupId, mutate, options) {
       const groups = (state.data && state.data.groups) || {}
       const source = groups[groupId]
       if (!source) return null
       const draft = JSON.parse(JSON.stringify(source))
       mutate(draft)
+      if (!(options && options.keepEmpty)) applyPortRules(groupId, draft)
       const gin = (draft.nodes || []).find((node) => node.id === 'gin')
       if (gin) gin.outputs = (draft.inputs || []).slice()
       const gout = (draft.nodes || []).find((node) => node.id === 'gout')
@@ -2418,8 +2714,7 @@ window.__ModuleLoader__.load({
       } else {
         for (const node of data.flowNodes || []) {
           const base = (data.flowPositions || {})[node.id] || { x: 80, y: 80 }
-          const delta = (state.drags || {})[node.id] || { dx: 0, dy: 0 }
-          box(node, base.x + (delta.dx || 0), base.y + (delta.dy || 0))
+          box(node, base.x, base.y)
         }
       }
       return out
@@ -2567,8 +2862,47 @@ window.__ModuleLoader__.load({
       editGroup(groupId, (draft) => {
         const list = side === 'in' ? (draft.inputs = draft.inputs || []) : (draft.outputs = draft.outputs || [])
         list.push(side === 'in' ? '输入 ' + (list.length + 1) : '输出 ' + (list.length + 1))
-      })
+      }, { keepEmpty: true })
       state.notice = side === 'in' ? '加了一个输入端口' : '加了一个输出端口'
+      notify()
+    }
+
+    /**
+     * 组输入 / 组输出：一个端口只走一条关系。
+     * 同一端口上挂了第二条关系时，就再加一个端口（名字取对端节点名），后面的关系挪过去。
+     * 原来的端口留给外面那条灰线——它的名字（上一节点名）不动。
+     */
+    function splitPortsInDraft(draft, which, seedName) {
+      const node = (draft.nodes || []).find((item) => item.id === which)
+      if (!node) return 0
+      const sideIn = which === 'gin'
+      const list = sideIn ? (draft.inputs = draft.inputs || []) : (draft.outputs = draft.outputs || [])
+      const portKey = sideIn ? 'fromPort' : 'toPort'
+      const selfKey = sideIn ? 'fromId' : 'toId'
+      const used = new Set()
+      let added = 0
+      for (const flow of draft.flows || []) {
+        if (flow[selfKey] !== which) continue
+        const port = Math.max(0, Number(flow[portKey]) || 0)
+        if (!used.has(port)) {
+          used.add(port)
+          continue
+        }
+        const seed = typeof seedName === 'function' ? seedName(port) : ''
+        list.push(seed || list[port] || (sideIn ? '输入 ' : '输出 ') + (list.length + 1))
+        flow[portKey] = list.length - 1
+        used.add(flow[portKey])
+        added += 1
+      }
+      return added
+    }
+
+    function splitGroupPorts(groupId, which) {
+      const names = groupPortNames(groupId)
+      const seed = which === 'gin' ? names.into : names.outOf
+      let added = 0
+      editGroup(groupId, (draft) => { added = splitPortsInDraft(draft, which, seed) })
+      state.notice = added > 0 ? '多加了 ' + added + ' 个端口' : '每条关系已经各占一个端口'
       notify()
     }
 
@@ -2765,15 +3099,8 @@ window.__ModuleLoader__.load({
           }))
           const positions = {}
           for (const node of group.nodes || []) positions['f:' + node.id] = { x: node.x || 0, y: node.y || 0 }
-          const edgeList = (group.flows || []).map((flow) => ({
-            id: flow.id,
-            from: 'f:' + flow.fromId,
-            to: 'f:' + flow.toId,
-            fromPort: flow.fromPort || 0,
-            toPort: flow.toPort || 0,
-            verb: flow.verb || '',
-            kind: 'verb',
-          }))
+          const innerKind = new Map((group.nodes || []).map((node) => [node.id, node.kind]))
+          const edgeList = spreadPorts(group.flows || [], innerKind)
           return { items: list, edges: edgeList, positions, inGroup: true }
         }
         const groups = (data && data.groups) || {}
@@ -2797,20 +3124,12 @@ window.__ModuleLoader__.load({
         const positions = {}
         for (const item of list) {
           const base = (data.flowPositions || {})[item.nodeId] || { x: 80, y: 80 }
-          const delta = (current.drags || {})[item.nodeId] || { dx: 0, dy: 0 }
-          positions[item.id] = { x: base.x + (delta.dx || 0), y: base.y + (delta.dy || 0) }
+          positions[item.id] = { x: base.x, y: base.y }
         }
-        const edgeList = (data.flows || []).map((flow) => ({
-          id: flow.id,
-          from: 'f:' + flow.fromId,
-          to: 'f:' + flow.toId,
-          fromPort: flow.fromPort || 0,
-          toPort: flow.toPort || 0,
-          verb: flow.verb || '',
-          kind: 'verb',
-        }))
+        const kindOf = new Map(list.map((item) => [item.nodeId, item.kind]))
+        const edgeList = spreadPorts(data.flows || [], kindOf)
         return { items: list, edges: edgeList, positions, inGroup: false }
-      }, [current.viewMode, data, current.drags, current.groupStack, group])
+      }, [current.viewMode, data, current.groupStack, group])
 
       const finalItems = useMemo(() => regroup(items, scopedEdges), [items, scopedEdges])
 
@@ -2961,24 +3280,18 @@ window.__ModuleLoader__.load({
           items.push({ label: '打开节点组', onClick: () => openGroupNode(node.id) })
           items.push({ label: '解散节点组', onClick: () => void ungroupNode(node.nodeId) })
         }
+        if (node.kind === 'input' && inGroup) {
+          items.push({ label: '每个关系一个端口', onClick: () => splitGroupPorts(group.id, 'gin') })
+        }
+        if (node.kind === 'output' && inGroup) {
+          items.push({ label: '每个关系一个端口', onClick: () => splitGroupPorts(group.id, 'gout') })
+        }
         if (node.kind !== 'input' && node.kind !== 'output') {
           items.push({ label: '重命名', onClick: () => startRenameNode(node) })
         }
         if (node.kind === 'group') {
-          items.push({ label: '加一个输入端口', onClick: () => addPort(node.nodeId, 'in') })
-          items.push({ label: '加一个输出端口', onClick: () => addPort(node.nodeId, 'out') })
           items.push({ label: '改节点组名字', onClick: () => startRenameGroup(node.nodeId) })
           if (!inGroup) items.push({ label: '删除节点组', danger: true, onClick: () => void deleteGroup(node.nodeId) })
-        }
-        if (inGroup && node.kind === 'node') {
-          items.push({
-            label: '加一个输入端口',
-            onClick: () => setNodePorts(group.id, node.nodeId, 'in', [...(node.inputs || []), '输入 ' + ((node.inputs || []).length + 1)]),
-          })
-          items.push({
-            label: '加一个输出端口',
-            onClick: () => setNodePorts(group.id, node.nodeId, 'out', [...(node.outputs || []), '输出 ' + ((node.outputs || []).length + 1)]),
-          })
         }
         if (node.kind !== 'input' && node.kind !== 'output') {
           items.push({
@@ -3018,7 +3331,6 @@ window.__ModuleLoader__.load({
             ...((state.picked || []).length > 0
               ? [{ label: '把框选的 ' + state.picked.length + ' 个节点收进节点组', onClick: () => void wrapSelection() }]
               : []),
-            ...(group ? [{ label: '加一个输入端口', onClick: () => addPort(group.id, 'in') }, { label: '加一个输出端口', onClick: () => addPort(group.id, 'out') }] : []),
           ]),
         }
         notify()
@@ -3098,8 +3410,6 @@ window.__ModuleLoader__.load({
           ? [
               h('button', { key: 'g1', onClick: () => void addNode(), style: ghostButton }, '＋ 节点'),
               h('button', { key: 'g2', onClick: () => void addGroupNode(), style: ghostButton }, '＋ 节点组'),
-              h('button', { key: 'g3', onClick: () => addPort(group.id, 'in'), style: ghostButton }, '＋ 输入'),
-              h('button', { key: 'g4', onClick: () => addPort(group.id, 'out'), style: ghostButton }, '＋ 输出'),
               h('button', { key: 'g5', onClick: () => startRenameGroup(group.id), style: ghostButton }, '重命名组'),
               h('button', { key: 'g6', onClick: () => closeGroup(), style: ghostButton, title: '返回上一层' }, '返回'),
             ]
@@ -3129,6 +3439,7 @@ window.__ModuleLoader__.load({
                             return
                           }
                           state.filePrompt = action
+                          if (action === 'new') state.fileDraft = defaultNewDrawioPath()
                           notify()
                         },
                         style: menuItemStyle,
@@ -3183,6 +3494,17 @@ window.__ModuleLoader__.load({
                 h('button', { key: 'b2', onClick: () => void addGroupNode(), style: { ...menuItemStyle, textAlign: 'center' } }, '＋ 添加节点组'),
                 h('button', { key: 'b3', onClick: () => { state.moreMenu = false; void duplicateSelected() }, style: { ...menuItemStyle, textAlign: 'center' } }, '再放一个同名节点'),
                 h('div', { key: 'sep', style: { height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0' } }),
+                h('button', {
+                  key: 'b5',
+                  onClick: () => {
+                    state.moreMenu = false
+                    state.draft = (data && data.settings && data.settings.graphFile) || ''
+                    state.undoDraft = (data && data.settings && data.settings.undoDepth) || 30
+                    state.showSettings = true
+                    notify()
+                  },
+                  style: { ...menuItemStyle, textAlign: 'center' },
+                }, '设置…'),
                 h('button', { key: 'b4', onClick: () => { state.moreMenu = false; void resetGraph() }, style: { ...menuItemStyle, color: 'var(--dsw-alias-state-error-primary)' } }, '清空这张图'),
               ]),
             ],
@@ -3244,10 +3566,10 @@ window.__ModuleLoader__.load({
               },
             },
             h('div',
-              { style: { width: 400, maxHeight: '82%', overflow: 'auto', padding: '10px 14px 12px', borderRadius: 12, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', boxShadow: '0 18px 48px rgba(0,0,0,0.32)' } },
+              { style: { width: 470, maxHeight: '82%', overflow: 'auto', padding: '10px 14px 12px', borderRadius: 12, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', boxShadow: '0 18px 48px rgba(0,0,0,0.32)' } },
               ...SHORTCUTS.map(([key, action]) =>
                 h('div', { key, style: { display: 'flex', gap: 12, padding: '3px 0', fontSize: 11, lineHeight: '16px' } },
-                  h('span', { style: { flex: '0 0 150px', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', color: 'var(--dsw-alias-label-primary)' } }, key),
+                  h('span', { style: { flex: '0 0 178px', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', color: 'var(--dsw-alias-label-primary)' } }, key),
                   h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, action),
                 ),
               ),
@@ -3306,8 +3628,13 @@ window.__ModuleLoader__.load({
             ? h(SettingsBar, {
                 data,
                 draft: current.draft ?? '',
+                undoDraft: current.undoDraft ?? 30,
                 onChange: (value) => {
                   state.draft = value
+                  notify()
+                },
+                onUndoChange: (value) => {
+                  state.undoDraft = value
                   notify()
                 },
                 onSave: () => void savePath(),
@@ -3385,7 +3712,7 @@ window.__ModuleLoader__.load({
                             }
                           })
                         } else {
-                          void moveNodes(entries, true)
+                          void moveNodes(entries)
                         }
                       },
                       onConnect: (fromId, fromPort, toId, toPort) => {
@@ -3400,6 +3727,10 @@ window.__ModuleLoader__.load({
                               toPort: toPort || 0,
                               verb: '',
                             })
+                            // 组输入/组输出一个端口只走一条关系：被占了就再加一个端口
+                            const portNames = groupPortNames(group.id)
+                            splitPortsInDraft(draft, 'gin', portNames.into)
+                            splitPortsInDraft(draft, 'gout', portNames.outOf)
                           })
                           state.notice = '已连上一条关系'
                           notify()
@@ -3410,6 +3741,7 @@ window.__ModuleLoader__.load({
                       onRenameNode: (node) => startRenameNode(node),
                       onRenameEdge: (edge) => startRenameEdge(edge),
                       onCutEdge: (edge) => void cutEdges([edge]),
+                      onCut: (list) => void cutEdges(list),
                       onContextNode: (node, x, y) => openNodeMenu(node, x, y),
                       onContextEdge: (edge, x, y) => openEdgeMenu(edge, x, y),
                       onContextBlank: (x, y) => openBlankMenu(x, y),

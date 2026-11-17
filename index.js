@@ -142,6 +142,16 @@ let state = null
 const graphs = new Map() // graphFile -> { graph, timer, loading }
 const lastWrite = new Map() // graphFile -> { rel, at, session }
 
+/** 可回退步数：10~1000，默认 30。 */
+const UNDO_MIN = 10
+const UNDO_MAX = 1000
+const UNDO_DEFAULT = 30
+function clampUndoDepth(value) {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return UNDO_DEFAULT
+  return Math.min(UNDO_MAX, Math.max(UNDO_MIN, n))
+}
+
 async function ensureState() {
   if (state) return state
   try {
@@ -149,10 +159,11 @@ async function ensureState() {
     state = {
       graphFile: typeof raw.graphFile === 'string' ? raw.graphFile : '',
       drawioFile: typeof raw.drawioFile === 'string' ? raw.drawioFile : '',
+      undoDepth: clampUndoDepth(raw.undoDepth),
       projects: raw.projects && typeof raw.projects === 'object' ? raw.projects : {},
     }
   } catch {
-    state = { graphFile: '', drawioFile: '', projects: {} }
+    state = { graphFile: '', drawioFile: '', undoDepth: UNDO_DEFAULT, projects: {} }
   }
   return state
 }
@@ -178,7 +189,6 @@ function emptyGraph(root) {
     // 画布层：节点各自有独立 id；节点信息（备注）按名字存。
     flowNodes: [],
     flowPositions: {},
-    drags: {},
     nodeNotes: {},
     groups: {},
     flows: [],
@@ -223,21 +233,22 @@ async function graphFor(graphFile, root) {
           flows: Array.isArray(parsed.flows) ? parsed.flows.filter((f) => f && f.fromId && f.toId) : [],
           flowNodes: Array.isArray(parsed.flowNodes) ? parsed.flowNodes.filter((n) => n && typeof n === 'object' && n.id) : [],
           flowPositions: parsed.flowPositions && typeof parsed.flowPositions === 'object' ? parsed.flowPositions : {},
-          drags: parsed.drags && typeof parsed.drags === 'object' ? parsed.drags : {},
           nodeNotes: parsed.nodeNotes && typeof parsed.nodeNotes === 'object' ? parsed.nodeNotes : {},
           groups: parsed.groups && typeof parsed.groups === 'object' ? parsed.groups : {},
+        }
+        // 老图里"基座 + 手拖矢量"两份位置 → 并成一份绝对坐标（只留 flowPositions）
+        if (parsed.drags && typeof parsed.drags === 'object') {
+          for (const [id, delta] of Object.entries(parsed.drags)) {
+            if (!delta) continue
+            const base = entry.graph.flowPositions[id] || { x: 80, y: 80 }
+            entry.graph.flowPositions[id] = { x: Math.round(base.x + (Number(delta.dx) || 0)), y: Math.round(base.y + (Number(delta.dy) || 0)) }
+          }
         }
         // 老模型（名字当 id 的 v2 画布、框、分身）→ 新模型：清掉画布层，等 .drawio 重新导入一次。
         if (!Array.isArray(parsed.flowNodes) || (parsed.flowNodes[0] && typeof parsed.flowNodes[0] === 'string')) {
           entry.graph.flowNodes = []
           entry.graph.flows = []
           entry.graph.flowPositions = {}
-          // 手拖矢量是"相对画布"的，按名字先存着：.drawio 导入后由 reconcileCanvas 接回新 id
-          const legacyDrags = {}
-          for (const [id, delta] of Object.entries(entry.graph.drags)) {
-            if (id.indexOf('f:') === 0 && delta) legacyDrags[id.slice(2)] = delta
-          }
-          entry.graph.drags = legacyDrags
           entry.graph.legacyDrags = true
         }
         delete entry.graph.frames
@@ -914,7 +925,7 @@ function pruneIsolated(graph, options = {}) {
 
 /** 把当前关系图导出成标准 .drawio（能被 drawio / drawai 直接打开）。
  *  节点按 id 落盘（id 是身份），名字只是标签 —— 同名节点可以有好几个。 */
-function buildDrawio(flowNodes, flows, knownPositions, groups) {
+function buildDrawio(flowNodes, flows, knownPositions, groups, notes) {
   const nodes = []
   const ids = new Set()
   for (const node of Array.isArray(flowNodes) ? flowNodes : []) {
@@ -983,10 +994,15 @@ function buildDrawio(flowNodes, flows, knownPositions, groups) {
       node.kind === 'group'
         ? 'rounded=1;whiteSpace=wrap;html=1;fillColor=#1d4ed8;fontColor=#ffffff;strokeColor=#1d4ed8;'
         : 'rounded=1;whiteSpace=wrap;html=1;'
-    cells.push(
-      '<mxCell id="' + esc(node.id) + '" value="' + esc(node.name) + '" style="' + style + '" vertex="1" parent="1">' +
-        '<mxGeometry x="' + pos.x + '" y="' + pos.y + '" width="170" height="' + heightOf(node) + '" as="geometry"/></mxCell>',
-    )
+    const geo = '<mxGeometry x="' + pos.x + '" y="' + pos.y + '" width="170" height="' + heightOf(node) + '" as="geometry"/>'
+    const cell = '<mxCell style="' + style + '" vertex="1" parent="1">' + geo + '</mxCell>'
+    const note = notes && typeof notes === 'object' ? notes[node.name] : ''
+    // 节点说明跟着节点一起写进 .drawio（drawio 的「编辑数据」里能看到）
+    if (String(note || '').trim()) {
+      cells.push('<UserObject id="' + esc(node.id) + '" label="' + esc(node.name) + '" note="' + esc(note) + '">' + cell + '</UserObject>')
+    } else {
+      cells.push('<mxCell id="' + esc(node.id) + '" value="' + esc(node.name) + '" style="' + style + '" vertex="1" parent="1">' + geo + '</mxCell>')
+    }
   }
   edges.forEach((edge, index) => {
     const edgeId = edge.id ? String(edge.id) : 'fe' + (index + 1)
@@ -1006,7 +1022,16 @@ function buildDrawio(flowNodes, flows, knownPositions, groups) {
 
 /** 把 .drawio 画布翻译成 节点（id/名字）+ 连线（按 id） + 每个节点的画布坐标。
  *  名字不截断：用户明确要求长名字原样保留。 */
-function parseDrawio(text) {
+function parseDrawio(rawText) {
+  // drawio 的「编辑数据」（UserObject）包着 mxCell：把 label / note 带回内层 mxCell 上再解析
+  const text = String(rawText).replace(/<UserObject\b([^>]*)>([\s\S]*?)<\/UserObject>/g, (all, uattrs, inner) => {
+    const pick = (name) => {
+      const m = uattrs.match(new RegExp(name + '="([^"]*)"'))
+      return m ? m[1] : ''
+    }
+    const injected = ' data-uid="' + pick('id') + '" data-uvalue="' + pick('label') + '" data-unote="' + (pick('note') || pick('tooltip')) + '"'
+    return inner.replace('<mxCell', '<mxCell' + injected)
+  })
   const blocks = text.split(/<mxCell\b/).slice(1)
   const attr = (tag, name) => {
     const m = tag.match(new RegExp(name + '="([^"]*)"'))
@@ -1027,17 +1052,19 @@ function parseDrawio(text) {
   const positions = {}
   const nodes = []
   const edges = []
+  const notes = {}
   for (const block of blocks) {
     const open = block.slice(0, block.indexOf('>') + 1)
-    const id = attr(open, 'id')
-    if (!id) continue
+    const id = attr(open, 'id') || attr(open, 'data-uid')
     if (/vertex="1"/.test(open)) {
-      const label = strip(decode(attr(open, 'value')).split('\n')[0])
+      const label = strip(decode(attr(open, 'data-uvalue') || attr(open, 'value')).split('\n')[0])
       const name = label.slice(0, 300) || id
       const style = attr(open, 'style')
       const kind = /fillColor=#1d4ed8/i.test(style) ? 'group' : 'node'
       vertices.set(id, { id, name, kind })
       nodes.push({ id, name, kind })
+      const note = strip(decode(attr(open, 'data-unote')))
+      if (note) notes[name] = note
       const geo = block.match(/<mxGeometry[^>]*x="([^"]+)"[^>]*y="([^"]+)"[^>]*\/?>/)
       if (geo) {
         const x = Number(geo[1])
@@ -1059,20 +1086,11 @@ function parseDrawio(text) {
     if (!vertices.has(edge.source) || !vertices.has(edge.target)) continue
     flows.push({ id: edge.id || undefined, fromId: edge.source, toId: edge.target, verb: edge.verb })
   }
-  return { nodes, flows, positions, nodeCount: vertices.size, edgeCount: flows.length }
+  return { nodes, flows, positions, notes, nodeCount: vertices.size, edgeCount: flows.length }
 }
 
-/** 画布重读后对齐内存模型：位置以画布为准；手拖矢量按节点 id 留着，
- *  id 变了（外部编辑器重建）就按名字接回去。节点组按 id 保留，消失的组一起清掉。 */
+/** 画布重读后对齐内存模型：位置只有一份，就在画布里（节点组按 id 保留，消失的组一起清掉）。 */
 function reconcileCanvas(graph, parsed) {
-  const prevNodes = Array.isArray(graph.flowNodes) ? graph.flowNodes : []
-  const prevNameById = new Map(prevNodes.map((node) => [node.id, node.name]))
-  const prevDrags = graph.drags && typeof graph.drags === 'object' ? graph.drags : {}
-  const dragByName = new Map()
-  for (const [id, delta] of Object.entries(prevDrags)) {
-    const name = prevNameById.get(id)
-    if (name && delta) dragByName.set(name, delta)
-  }
   const groups = graph.groups && typeof graph.groups === 'object' ? graph.groups : {}
   const nodes = (parsed.nodes || []).map((node) => ({
     id: node.id,
@@ -1100,19 +1118,28 @@ function reconcileCanvas(graph, parsed) {
   }
   const ids = new Set(nodes.map((node) => node.id))
   for (const id of Object.keys(groups)) if (!ids.has(id)) delete groups[id]
-  // v2 迁过来的手拖矢量是按名字存的（旧图没有 id），这里按名字接回新 id
-  const legacyDrags = graph.legacyDrags ? prevDrags : null
-  const drags = {}
-  for (const node of nodes) {
-    const delta = prevDrags[node.id] || dragByName.get(node.name) || (legacyDrags && legacyDrags[node.name])
-    if (delta) drags[node.id] = delta
-  }
   delete graph.legacyDrags
-  graph.drags = drags
+  delete graph.drags
   graph.flowNodes = nodes
   graph.flowPositions = parsed.positions || {}
+  // 节点说明也在画布里：画布上改的为准
+  if (parsed.notes && typeof parsed.notes === 'object') {
+    if (!graph.nodeNotes || typeof graph.nodeNotes !== 'object') graph.nodeNotes = {}
+    for (const node of nodes) {
+      const text = parsed.notes[node.name]
+      if (text) graph.nodeNotes[node.name] = text
+      else if (graph.nodeNotes[node.name]) delete graph.nodeNotes[node.name]
+    }
+  }
   graph.flows = (parsed.flows || []).slice(-600)
   graph.groups = groups
+}
+
+/** 路径没写后缀就补 .drawio：不然能存出个没后缀的文件，「打开」框里又只列 .drawio，找不回来。 */
+function withDrawioExt(value) {
+  const target = String(value || '').trim()
+  if (!target) return ''
+  return path.basename(target).indexOf('.') > 0 ? target : target + '.drawio'
 }
 
 async function syncDrawio(current) {
@@ -1160,7 +1187,7 @@ async function payloadFor(current, root) {
       edges: [],
       windows: [],
       sources: [],
-      settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '' },
+      settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '', undoDepth: current.undoDepth ?? UNDO_DEFAULT },
     }
   }
   const entry = await graphFor(active.graphFile, active.root)
@@ -1180,11 +1207,10 @@ async function payloadFor(current, root) {
     flowNodes: graph.flowNodes ?? [],
     flows: graph.flows ?? [],
     flowPositions: graph.flowPositions ?? {},
-    drags: graph.drags ?? {},
     nodeNames: (graph.flowNodes ?? []).map((node) => node.name),
     nodeNotes: graph.nodeNotes ?? {},
     groups: graph.groups ?? {},
-    settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '' },
+    settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '', undoDepth: current.undoDepth ?? UNDO_DEFAULT },
   }
 }
 
@@ -1206,8 +1232,10 @@ export function apply(ctx, config = {}) {
     const active = projectRows(current)[0]
     if (!active) return fail(res, 'no project recorded yet', 404)
     const entry = await graphFor(active.graphFile, active.root)
+    await snapshotGraph(entry.graph, active.graphFile)
     const extra = await fn(entry.graph, { current, active, entry })
     if (extra === false) return
+    if (entry.graph && entry.graph.groups) normalizeAllGroupPorts(entry.graph)
     await flushGraph(entry, active.graphFile)
     sendJson(res, 200, { ok: true, ...(extra || {}), ...(await payloadFor(current, active.root)) })
   }
@@ -1252,8 +1280,17 @@ export function apply(ctx, config = {}) {
       }
       scheduleStateSave()
     }
+    if (body.undoDepth !== undefined) {
+      current.undoDepth = clampUndoDepth(body.undoDepth)
+      const activeRow = projectRows(current)[0]
+      const stack = activeRow ? undoStack.get(activeRow.graphFile) : null
+      if (stack) {
+        while (stack.length > current.undoDepth) stack.shift()
+        if (activeRow) saveUndoSoon(activeRow.graphFile)
+      }
+    }
     await writeJsonAtomic(stateFile(), current)
-    sendJson(res, 200, { ok: true, settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '' } })
+    sendJson(res, 200, { ok: true, settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '', undoDepth: current.undoDepth ?? UNDO_DEFAULT } })
   })
 
   postRoute(RESET_ROUTE, async (req, res, body) => {
@@ -1283,6 +1320,9 @@ export function apply(ctx, config = {}) {
     entry.graph.drawioMtime = 0
     entry.graph.updatedAt = Date.now()
     lastWrite.delete(target.graphFile)
+    canvasDirty.delete(target.graphFile)
+    undoStack.delete(target.graphFile)
+    void fsp.rm(undoFileFor(target.graphFile), { force: true }).catch(() => {})
     await flushGraph(entry, target.graphFile)
     // 画布文件也清空：否则下次读盘会把旧 .drawio 又导回来
     await writeCanvas(entry.graph, current, target)
@@ -1414,8 +1454,9 @@ export function apply(ctx, config = {}) {
 
   // 新建一个空的关系文件（.drawio），并把它设为当前文件。
   postRoute('/filegraph/new', async (req, res, body) => {
-    const target = String(body.path || '').trim()
+    const target = withDrawioExt(body.path)
     if (!target) return fail(res, 'path required')
+    await flushCanvasDirty()
     const exists = await fsp.stat(target).then(() => true).catch(() => false)
     if (exists && body.overwrite !== true) return fail(res, '文件已存在', 409)
     const empty =
@@ -1445,17 +1486,6 @@ export function apply(ctx, config = {}) {
   })
 
   /* --------------------------------------------- 画布：节点 / 关系 / 节点组 */
-  const drawioHistory = new Map()
-
-  async function pushHistory(file) {
-    try {
-      const text = await fsp.readFile(file, 'utf8')
-      const stack = drawioHistory.get(file) || []
-      stack.push(text)
-      while (stack.length > 60) stack.shift()
-      drawioHistory.set(file, stack)
-    } catch {}
-  }
 
   function currentDrawioPath(current, root) {
     return current.drawioFile && current.drawioFile.trim()
@@ -1467,14 +1497,86 @@ export function apply(ctx, config = {}) {
   async function writeCanvas(graph, current, active) {
     const file = currentDrawioPath(current, active.root)
     await fsp.mkdir(path.dirname(file), { recursive: true })
-    await pushHistory(file)
-    await fsp.writeFile(file, buildDrawio(graph.flowNodes || [], graph.flows || [], graph.flowPositions || {}, graph.groups || {}), 'utf8')
+    await fsp.writeFile(file, buildDrawio(graph.flowNodes || [], graph.flows || [], graph.flowPositions || {}, graph.groups || {}, graph.nodeNotes || {}), 'utf8')
     current.drawioFile = file
     try {
       const info = await fsp.stat(file)
       graph.drawioMtime = info.mtimeMs
     } catch {
       graph.drawioMtime = 0
+    }
+  }
+
+  /* 回退栈：整份图快照（.drawio 只是它的导出，所以回退也照快照重建）。
+   * 只保留最近 undoDepth 步，超出的一律丢掉、也不落盘，免得文件越滚越大。 */
+  const undoStack = new Map()
+  const undoFiles = new Map() // graphFile -> 持久化路径
+
+  function undoFileFor(graphFile) {
+    if (!undoFiles.has(graphFile)) undoFiles.set(graphFile, graphFile + '.undo.json')
+    return undoFiles.get(graphFile)
+  }
+
+  async function loadUndo(graphFile) {
+    if (undoStack.has(graphFile)) return
+    try {
+      const raw = JSON.parse(await fsp.readFile(undoFileFor(graphFile), 'utf8'))
+      const list = Array.isArray(raw) ? raw.filter((item) => typeof item === 'string') : []
+      const depth = clampUndoDepth(state && state.undoDepth)
+      undoStack.set(graphFile, list.slice(-depth))
+    } catch {
+      undoStack.set(graphFile, [])
+    }
+  }
+
+  const undoTimers = new Map()
+  const undoWriting = new Map() // graphFile -> 串行写盘（并发写会互相覆盖）
+  function saveUndoNow(graphFile) {
+    const stack = (undoStack.get(graphFile) || []).slice()
+    const prev = undoWriting.get(graphFile) || Promise.resolve()
+    const next = prev
+      .then(() => (stack.length > 0 ? writeJsonAtomic(undoFileFor(graphFile), stack) : Promise.resolve()))
+      .catch(() => {})
+    undoWriting.set(graphFile, next)
+    return next
+  }
+  function saveUndoSoon(graphFile) {
+    if (undoTimers.has(graphFile)) return
+    const timer = setTimeout(() => {
+      undoTimers.delete(graphFile)
+      void saveUndoNow(graphFile)
+    }, 1200)
+    if (timer && typeof timer.unref === 'function') timer.unref()
+    undoTimers.set(graphFile, timer)
+  }
+
+  async function snapshotGraph(graph, graphFile) {
+    await loadUndo(graphFile)
+    const depth = clampUndoDepth(state && state.undoDepth)
+    const stack = undoStack.get(graphFile) || []
+    stack.push(JSON.stringify(graph))
+    // 超过可回退步数的旧快照直接丢掉：不留在内存，也不写进文件
+    while (stack.length > depth) stack.shift()
+    undoStack.set(graphFile, stack)
+    saveUndoSoon(graphFile)
+  }
+
+  /* 位置矢量只存一份（绝对坐标），动一次先记内存：保存 / 退出 / 每 3 分钟才落盘。 */
+  const canvasDirty = new Map()
+
+  function markCanvasDirty(graph, current, active) {
+    if (!graph || !current || !active) return
+    canvasDirty.set(active.graphFile, { graph, current, active })
+  }
+
+  async function flushCanvasDirty(onlyGraphFile) {
+    for (const [file, item] of [...canvasDirty]) {
+      if (onlyGraphFile && file !== onlyGraphFile) continue
+      canvasDirty.delete(file)
+      try {
+        await writeCanvas(item.graph, item.current, item.active)
+        await flushGraph(item.graph, file)
+      } catch {}
     }
   }
 
@@ -1532,6 +1634,58 @@ export function apply(ctx, config = {}) {
       }
     }
     return { x: 60 + taken.length * 24, y: 60 + taken.length * 24 }
+  }
+
+  /**
+   * 组端口规则（主画布这一层）：一个端口只走一条关系，并且保持 n+1
+   * （n 条已接 + 1 个空口）。组输入口没名字时用上一节点名，输出口用默认名。
+   */
+  function normalizeGroupPorts(graph, gid) {
+    const group = (graph.groups || {})[gid]
+    if (!group) return
+    const nodeName = (id) => {
+      const hit = (graph.flowNodes || []).find((node) => node.id === id)
+      return (hit && hit.name) || ''
+    }
+    const flows = graph.flows || []
+    const doSide = (side) => {
+      const sideIn = side === 'in'
+      const list = sideIn ? (group.inputs = Array.isArray(group.inputs) ? group.inputs : []) : (group.outputs = Array.isArray(group.outputs) ? group.outputs : [])
+      const rows = flows.filter((flow) => (sideIn ? flow.toId === gid : flow.fromId === gid))
+      const key = sideIn ? 'toPort' : 'fromPort'
+      const used = new Set()
+      for (const flow of rows) {
+        let port = Math.max(0, Number(flow[key]) || 0)
+        if (used.has(port)) {
+          port = 0
+          while (used.has(port)) port += 1
+        }
+        used.add(port)
+        while (list.length <= port) list.push('')
+        if (!String(list[port] || '').trim()) {
+          const label = sideIn ? nodeName(flow.fromId) : ''
+          list[port] = label ? label.slice(0, 60) : (sideIn ? '输入 ' : '输出 ') + (port + 1)
+        }
+        flow[key] = port
+      }
+      // 只在真接着外部线时才补末端空口（n+1）；用户/组内部声明的端口一个都不删
+      if (rows.length > 0 && (used.size === 0 || used.has(list.length - 1))) {
+        list.push((sideIn ? '输入 ' : '输出 ') + (list.length + 1))
+      }
+      if (sideIn) group.inputs = list
+      else group.outputs = list
+    }
+    doSide('in')
+    doSide('out')
+    // 组内部的 组输入 / 组输出 跟着对外端口走
+    for (const inner of group.nodes || []) {
+      if (inner.id === 'gin') inner.outputs = (group.inputs || []).slice()
+      if (inner.id === 'gout') inner.inputs = (group.outputs || []).slice()
+    }
+  }
+
+  function normalizeAllGroupPorts(graph) {
+    for (const gid of Object.keys(graph.groups || {})) normalizeGroupPorts(graph, gid)
   }
 
   function ensureCanvas(graph) {
@@ -1783,11 +1937,7 @@ export function apply(ctx, config = {}) {
     if (!groupNode) return null
     const basePos = parent
       ? { x: Number(groupNode.x) || 0, y: Number(groupNode.y) || 0 }
-      : (() => {
-          const base = graph.flowPositions[groupId] || { x: 80, y: 80 }
-          const delta = graph.drags[groupId] || { dx: 0, dy: 0 }
-          return { x: base.x + (delta.dx || 0), y: base.y + (delta.dy || 0) }
-        })()
+      : (graph.flowPositions[groupId] || { x: 80, y: 80 })
 
     const inEdges = new Map()
     const outEdges = new Map()
@@ -2015,6 +2165,7 @@ export function apply(ctx, config = {}) {
       return
     }
     const entry = await graphFor(rows[0].graphFile, rows[0].root)
+    await flushCanvasDirty(rows[0].graphFile)
     await flushGraph(entry, rows[0].graphFile)
     await writeJsonAtomic(stateFile(), current)
     sendJson(res, 200, { ok: true, savedAt: Date.now() })
@@ -2024,19 +2175,24 @@ export function apply(ctx, config = {}) {
     const current = await ensureState()
     const rows = projectRows(current)
     if (!rows[0]) return fail(res, 'no active project')
-    const file = currentDrawioPath(current, rows[0].root)
-    const stack = drawioHistory.get(file) || []
+    const graphFile = rows[0].graphFile
+    await loadUndo(graphFile)
+    const stack = undoStack.get(graphFile) || []
     if (stack.length === 0) {
       sendJson(res, 200, { ok: false, error: '没有可回退的操作' })
       return
     }
-    const previous = stack.pop()
-    await fsp.writeFile(file, previous, 'utf8')
-    const entry = await graphFor(rows[0].graphFile, rows[0].root)
+    const entry = await graphFor(graphFile, rows[0].root)
+    // 还没落盘的拖位置先丢掉（它会被快照一起盖掉）
+    canvasDirty.delete(graphFile)
+    const snapshot = JSON.parse(stack.pop())
+    for (const key of Object.keys(entry.graph)) delete entry.graph[key]
+    Object.assign(entry.graph, snapshot)
     entry.graph.drawioMtime = 0
-    await syncDrawio(current)
-    await flushGraph(entry, rows[0].graphFile)
-    sendJson(res, 200, { ok: true, undone: true, ...(await payloadFor(current, rows[0].root)) })
+    await writeCanvas(entry.graph, current, rows[0])
+    await flushGraph(entry, graphFile)
+    saveUndoSoon(graphFile)
+    sendJson(res, 200, { ok: true, undone: true, left: stack.length, ...(await payloadFor(current, rows[0].root)) })
   })
 
   // 剪刀：按 id（或两端）删掉关系
@@ -2152,12 +2308,14 @@ export function apply(ctx, config = {}) {
   postRoute('/filegraph/note', async (req, res, body) => {
     const name = String(body.name || '').trim()
     if (!name) return fail(res, 'name required')
-    await editGraph(res, async (graph, { entry, active }) => {
+    await editGraph(res, async (graph, { current, active, entry }) => {
       ensureCanvas(graph)
       const text = String(body.text || '').trim()
       if (text) graph.nodeNotes[name] = text
       else delete graph.nodeNotes[name]
       graph.updatedAt = Date.now()
+      // 说明也写进 .drawio（UserObject 的 note 属性），换文件不会丢
+      await writeCanvas(graph, current, active)
       await flushGraph(entry, active.graphFile)
       return {}
     })
@@ -2389,7 +2547,8 @@ export function apply(ctx, config = {}) {
     })
   })
 
-  // 手拖只存"相对画布的矢量"，画布重排后再叠加也不跑偏。
+  // 手拖的位置：直接改成绝对坐标存进 flowPositions（只留一份），先记内存，
+  // 保存 / 退出 / 每 3 分钟才写回 .drawio。
   postRoute(DRAG_ROUTE, async (req, res, body) => {
     const current = await ensureState()
     const rows = projectRows(current)
@@ -2397,31 +2556,37 @@ export function apply(ctx, config = {}) {
     if (!active) return fail(res, 'no active project')
     const entry = await graphFor(active.graphFile, active.root)
     const graph = entry.graph
-    if (!graph.drags || typeof graph.drags !== 'object') graph.drags = {}
+    await snapshotGraph(graph, active.graphFile)
+    if (!graph.flowPositions || typeof graph.flowPositions !== 'object') graph.flowPositions = {}
     if (body.reset === true) {
       graph.drags = {}
     } else {
       const list = Array.isArray(body.entries) ? body.entries : body.id ? [body] : []
       for (const item of list) {
         if (!item || typeof item.id !== 'string') continue
-        const dx = Math.round(Number(item.dx) || 0)
-        const dy = Math.round(Number(item.dy) || 0)
-        if (dx === 0 && dy === 0) delete graph.drags[item.id]
-        else graph.drags[item.id] = { dx, dy }
+        const id = bareId(item.id)
+        const x = Number(item.x)
+        const y = Number(item.y)
+        if (!id || !Number.isFinite(x) || !Number.isFinite(y)) continue
+        graph.flowPositions[id] = { x: Math.round(x), y: Math.round(y) }
       }
     }
+    if (graph.drags && Object.keys(graph.drags).length > 0) graph.drags = {}
     graph.updatedAt = Date.now()
+    markCanvasDirty(graph, current, active)
     await flushGraph(entry, active.graphFile)
-    sendJson(res, 200, { ok: true, drags: graph.drags })
+    sendJson(res, 200, { ok: true, positions: graph.flowPositions })
   })
 
   // 文件菜单：打开 / 恢复 / 另存为 / 保存副本（借 Blender 的"文档即文件"用法）
   postRoute(OPEN_ROUTE, async (req, res, body) => {
-    const target = String(body.path || '').trim()
+    const target = withDrawioExt(body.path)
     if (!target) return fail(res, 'path required')
     const current = await ensureState()
     const exists = await fsp.stat(target).then(() => true).catch(() => false)
     if (!exists) return fail(res, '文件不存在：' + target, 404)
+    // 换文件前先把旧图还没落盘的改动写掉，否则切过去就丢
+    await flushCanvasDirty()
     current.drawioFile = target
     const rows = projectRows(current)
     if (rows[0]) {
@@ -2434,7 +2599,7 @@ export function apply(ctx, config = {}) {
   })
 
   postRoute(EXPORT_ROUTE, async (req, res, body) => {
-    const outPath = String(body.path || '').trim()
+    const outPath = withDrawioExt(body.path)
     if (!outPath) return fail(res, 'path required')
     const current = await ensureState()
     const rows = projectRows(current)
@@ -2443,7 +2608,7 @@ export function apply(ctx, config = {}) {
     if (!entry) return fail(res, '还没有项目记录')
     ensureCanvas(entry.graph)
     if ((entry.graph.flowNodes || []).length === 0) return fail(res, '当前还没有节点可导出')
-    await fsp.writeFile(outPath, buildDrawio(entry.graph.flowNodes, entry.graph.flows, entry.graph.flowPositions, entry.graph.groups), 'utf8')
+    await fsp.writeFile(outPath, buildDrawio(entry.graph.flowNodes, entry.graph.flows, entry.graph.flowPositions, entry.graph.groups, entry.graph.nodeNotes || {}), 'utf8')
     if (body.switchTo === true) {
       current.drawioFile = outPath
       entry.graph.drawioMtime = 0
@@ -2453,7 +2618,13 @@ export function apply(ctx, config = {}) {
     sendJson(res, 200, { ok: true, exported: outPath, nodes: entry.graph.flowNodes.length, flows: (entry.graph.flows || []).length })
   })
   // 卸载时把还没落盘的图写完，别丢最后几次写入。
-  ctx.effect(() => () => {
-    for (const [file, entry] of graphs) void flushGraph(entry, file)
+  ctx.effect(() => {
+    const timer = setInterval(() => { void flushCanvasDirty() }, 3 * 60 * 1000)
+    if (timer && typeof timer.unref === 'function') timer.unref()
+    return () => {
+      clearInterval(timer)
+      void flushCanvasDirty()
+      for (const [file, entry] of graphs) void flushGraph(entry, file)
+    }
   })
 }

@@ -158,11 +158,18 @@ assert('重读后组内部还在', gBack && gBack.nodes.some((n) => n.name === '
 await step('note', '/filegraph/note', { name: 'A', text: '备注内容' })
 d = await data()
 assert('备注按名字存', d.nodeNotes && d.nodeNotes['A'] === '备注内容', '')
+// 说明必须落在 .drawio 里（UserObject 的 note 属性），不是只存 graph.json
+const noteText = fs.readFileSync(drawio, 'utf8')
+assert('说明写进了 .drawio', /<UserObject[^>]*note="备注内容"/.test(noteText), noteText.slice(0, 200))
+await step('import again', '/filegraph/import', { path: drawio })
+d = await data()
+assert('重读 .drawio 后备注还在', d.nodeNotes && d.nodeNotes['A'] === '备注内容', JSON.stringify(d.nodeNotes))
 
 await step('position', '/filegraph/position', { positions: { [idA]: { x: 40, y: 50 } } })
-await step('drag', '/filegraph/drag', { entries: [{ id: idA, dx: 10, dy: 12 }] })
+await step('drag', '/filegraph/drag', { entries: [{ id: idA, x: 210, y: 96 }] })
 d = await data()
-assert('拖动矢量按 id 存', d.drags && d.drags[idA] && d.drags[idA].dx === 10, JSON.stringify(d.drags))
+assert('手拖直接写绝对坐标（位置只存一份）', d.flowPositions && d.flowPositions[idA] && d.flowPositions[idA].x === 210 && d.flowPositions[idA].y === 96, JSON.stringify(d.flowPositions && d.flowPositions[idA]))
+assert('没有 drags 这一层了', d.drags === undefined, '')
 
 // 旧的“框”必须彻底没了
 assert('frame 路由已删除', handlers.get('/filegraph/frame') === undefined, '')
@@ -212,8 +219,8 @@ d = await data()
 const wg = d.groups[wgid]
 assert('wrap 节点移进组里', wg && wg.nodes.some((n) => n.id === wx) && wg.nodes.some((n) => n.id === wy), '')
 assert('wrap 顶层不再有原节点', !(d.flowNodes || []).some((n) => n.id === wx || n.id === wy), '')
-assert('wrap 输入端口来自入边', wg && wg.inputs.join(',') === '送进去', JSON.stringify(wg && wg.inputs))
-assert('wrap 输出端口来自出边', wg && wg.outputs.join(',') === '写出', JSON.stringify(wg && wg.outputs))
+assert('wrap 输入端口来自入边（末尾多留一个空口）', wg && wg.inputs.join(',') === '送进去,输入 2', JSON.stringify(wg && wg.inputs))
+assert('wrap 输出端口来自出边（末尾多留一个空口）', wg && wg.outputs.join(',') === '写出,输出 2', JSON.stringify(wg && wg.outputs))
 assert('wrap 内部保留 XY 边', wg && wg.flows.some((f) => f.fromId === wx && f.toId === wy), '')
 assert('wrap 内部接上 gin', wg && wg.flows.some((f) => f.fromId === 'gin' && f.toId === wx), '')
 assert('wrap 内部接上 gout', wg && wg.flows.some((f) => f.fromId === wy && f.toId === 'gout'), '')
@@ -226,8 +233,22 @@ const outerId = wrapped2.json && wrapped2.json.created
 d = await data()
 const innerGroupNode = outerId && (d.groups[outerId].nodes || []).find((n) => n.id === wgid)
 assert('节点组可以放进节点组', !!(innerGroupNode && innerGroupNode.kind === 'group'), '')
-assert('嵌套组端口保留', !!(innerGroupNode && innerGroupNode.inputs.join(',') === '送进去'), JSON.stringify(innerGroupNode && innerGroupNode.inputs))
+assert('嵌套组端口保留', !!(innerGroupNode && innerGroupNode.inputs.join(',') === '送进去,输入 2'), JSON.stringify(innerGroupNode && innerGroupNode.inputs))
 assert('原组数据还在', !!d.groups[wgid], '')
+
+// 同一个组输入口被两条线接 → 自动拆开，并保持 n+1（多留一个空口）
+const gNew = (await step('make group for ports', '/filegraph/group', { action: 'create', name: '端口组' })).json.created
+const gpA = (await step('node for group port A', '/filegraph/node', { name: 'GPA' })).json.added
+const gpB = (await step('node for group port B', '/filegraph/node', { name: 'GPB' })).json.added
+await step('edge to group port 0', '/filegraph/edge', { fromId: gpA, toId: gNew, toPort: 0 })
+await step('edge to group port 0 again', '/filegraph/edge', { fromId: gpB, toId: gNew, toPort: 0 })
+await step('touch group', '/filegraph/group', { action: 'rename', id: gNew, name: '端口组2' })
+d = await data()
+const gpPorts = d.groups[gNew]
+const inFlows = (d.flows || []).filter((f) => f.toId === gNew)
+assert('同一个输入口的两条线被拆成两个口', new Set(inFlows.map((f) => f.toPort)).size === inFlows.length, JSON.stringify(inFlows.map((f) => f.toPort)))
+assert('组输入保持 n+1（已接 + 一个空口）', gpPorts.inputs.length === inFlows.length + 1, JSON.stringify(gpPorts.inputs))
+assert('组输出也留了空口', gpPorts.outputs.length === 1, JSON.stringify(gpPorts.outputs))
 
 // 解散节点组（嵌套）：外层组解散 → 里面的节点组回到顶层，组数据还在
 await step('ungroup outer', '/filegraph/group', { action: 'ungroup', id: outerId })
@@ -253,8 +274,49 @@ assert('解散后入边接回外部', (d.flows || []).some((f) => f.fromId === u
 assert('解散后出边接回外部', (d.flows || []).some((f) => f.fromId === uq && f.toId === ur), '')
 assert('解散后没有残留组端口边', !(d.flows || []).some((f) => f.fromId === ugid || f.toId === ugid), '')
 
-await step('undo', '/filegraph/undo', {})
-await step('save', '/filegraph/save', {})
+// Ctrl+Z：撤销新增节点、撤销剪切（含组内删线）
+const beforeUndo = (await data()).flowNodes.length
+await step('node for undo', '/filegraph/node', { name: 'UNDO1' })
+assert('新增节点成功', (await data()).flowNodes.length === beforeUndo + 1, '')
+await step('undo add', '/filegraph/undo', {})
+assert('Ctrl+Z 撤回新增节点', (await data()).flowNodes.length === beforeUndo, '')
+
+const u1 = (await step('undo node U1', '/filegraph/node', { name: 'U1' })).json.added
+const u2 = (await step('undo node U2', '/filegraph/node', { name: 'U2' })).json.added
+await step('undo edge U1U2', '/filegraph/edge', { fromId: u1, toId: u2, verb: '回退用' })
+const beforeCutFlows = (await data()).flows.length
+const cutTarget = (await data()).flows.find((f) => f.fromId === u1 && f.toId === u2)
+await step('cut for undo', '/filegraph/remove-edge', { edges: [{ id: cutTarget.id }] })
+assert('剪切生效', (await data()).flows.length === beforeCutFlows - 1, '')
+await step('undo cut', '/filegraph/undo', {})
+assert('Ctrl+Z 撤回剪切', (await data()).flows.length === beforeCutFlows, '')
+
+// 组内删线也能回退（组数据只在 graph.json 里，原来回退不了就是这个原因）
+const gd = (await step('undo group', '/filegraph/group', { action: 'create', name: '回退组' })).json.created
+const gFlowEdge = await step('undo group edge', '/filegraph/edge', { fromId: u1, toId: gd, verb: '进组' })
+assert('建组内边', gFlowEdge.json && gFlowEdge.json.added === true, '')
+const groupFlowsBefore = (await data()).groups[gd].flows.length
+await step('cut in group', '/filegraph/group', { action: 'save', id: gd, data: { ...(await data()).groups[gd], flows: [] } })
+assert('组内删线生效', (await data()).groups[gd].flows.length === 0, '')
+await step('undo group cut', '/filegraph/undo', {})
+assert('Ctrl+Z 撤回组内删线', (await data()).groups[gd].flows.length === groupFlowsBefore, '')
+
+// 回退步数：范围 10~1000、默认 30；超出步数的旧快照不保存（文件不会越滚越大）
+let st = await step('set depth 5', '/filegraph/settings', { undoDepth: 5 })
+assert('步数下限夹到 10', st.json && st.json.settings.undoDepth === 10, JSON.stringify(st.json && st.json.settings))
+st = await step('set depth 5000', '/filegraph/settings', { undoDepth: 5000 })
+assert('步数上限夹到 1000', st.json && st.json.settings.undoDepth === 1000, JSON.stringify(st.json && st.json.settings))
+await step('set depth 10', '/filegraph/settings', { undoDepth: 10 })
+const depthEcho = await step('read depth', '/filegraph/settings', {})
+assert('步数设置为 10 生效', depthEcho.json && depthEcho.json.settings.undoDepth === 10, JSON.stringify(depthEcho.json && depthEcho.json.settings))
+for (let i = 0; i < 14; i += 1) await step('mut ' + i, '/filegraph/node', { name: 'UD' + i })
+await new Promise((r) => setTimeout(r, 1600))
+const activeGraphFile = (await data()).active.graphFile
+const undoPath = activeGraphFile + '.undo.json'
+const undoFile = fs.existsSync(undoPath) ? JSON.parse(fs.readFileSync(undoPath, 'utf8')) : null
+assert('回退栈落盘了', Array.isArray(undoFile) && undoFile.length > 0, undoPath)
+assert('超出 10 步的旧快照不保存', Array.isArray(undoFile) && undoFile.length <= 10, undoFile ? String(undoFile.length) : 'no file')
+
 await step('reset', '/filegraph/reset', {})
 d = await data()
 assert('清空后无画布', (d.flowNodes || []).length === 0 && (d.flows || []).length === 0 && Object.keys(d.groups || {}).length === 0, '')

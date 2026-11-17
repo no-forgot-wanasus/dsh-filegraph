@@ -145,6 +145,6 @@ const picked = render((s) => s.replace('      picked: [],', "      picked: ['f:n
 check(picked, '框选高亮', ['stroke-dasharray="5 3"'])
 
 const help = render((s) => s.replace('      helpOpen: false,', '      helpOpen: true,'), '操作说明弹窗')
-check(help, '操作说明弹窗', ['Shift+A', '收进节点组', 'Ctrl+Z', '右键 节点/线/空白', '关闭'])
+check(help, '操作说明弹窗', ['Shift + A', '收进节点组', 'Ctrl + Z', '右键空白', '左键拖输出端口', '关闭'])
 
 console.log(problems.length === 0 ? 'ALL OK' : 'FAILED:\n' + problems.join('\n'))
