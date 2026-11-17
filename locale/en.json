@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Relations",
+    "description": "Draw how things relate: every node has its own id, data is keyed by name, and node groups open up into their own canvas."
+  }
+}

@@ -1,0 +1,5 @@
+# dsh-filegraph bundle patch: one Host row; the panel lives in client.js.
+- insert:
+    - id: filegraph
+      name: '@local/dsh-filegraph'
+      config: {}
