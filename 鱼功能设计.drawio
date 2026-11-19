@@ -14,15 +14,15 @@
 <mxCell id="n15" value="归档进 digest" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1215" y="250" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n16" value="记判重表" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1215" y="321" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n17" value="写海马体流" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1215" y="460" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n18" value="思考" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="903" y="482" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n18" value="思考" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="825" y="541" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n19" value="看屏幕画面" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="250" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n20" value="读房间对话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="180" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n21" value="等心跳叫醒" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="760" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n22" value="play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="240" y="800" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n23" value="读临时记忆" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1215" y="40" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n24" value="发出私信" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1880" y="125" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n24" value="发出私信" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1847" y="-56" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n25" value="在悬浮窗说话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1878" y="138" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n26" value="是否通过" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="461" y="302" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n26" value="是否通过" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1586" y="-220" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n27" value="避（边界）" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="520" y="820" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n28" value="选房间 / play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="900" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n29" value="读评论 / 弹幕" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="110" width="170" height="48" as="geometry"/></mxCell>

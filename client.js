@@ -3,7 +3,7 @@
  *
  * 两个画布：
  *   FlowCanvas —— 关系画布：节点（独立 id）/ 关系（带动作）/ 节点组（蓝色、多端口、右键打开）；
- *   GraphCanvas —— 全部视图：AI 读过写过的文件、窗口、其他来源（只读观察层）。
+ *   FlowCanvas —— 关系画布：节点、关系、节点组；详情栏 / 文件对话框 / 说明弹窗。
  * 节点信息（备注）按名字存：同名节点共用数据，但各有各的 id 与连线。
  */
 window.__ModuleLoader__.load({
@@ -60,8 +60,8 @@ window.__ModuleLoader__.load({
       ['左键拖端口到节点框上', '连一条关系'],
       ['滚轮', '缩放（不设上限）'],
       ['文件 ▾', '新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档'],
-      ['关系 ▾', '关系 / 全部 / 此节点关系 / 此节点链路'],
-      ['⋯', '加节点 / 加节点组 / 再放同名 / 设置 / 清空这张图'],
+      ['全部 ▾', '全部 / 此节点关系 / 此节点链路'],
+      ['⋯', '加节点 / 加节点组 / 工作流预设 / 设置 / 清空这张图'],
       ['左上角路径', '回到上一层节点组'],
     ]
 
@@ -76,10 +76,9 @@ window.__ModuleLoader__.load({
       data: null,
       error: null,
       selected: null,
-      showWindows: false,
-      showFileRef: true,
       fileMenu: false,
       scopeMode: 'none',
+      scopeDrags: {},
       moreMenu: false,
       viewMenu: false,
       filePrompt: '',
@@ -137,8 +136,15 @@ window.__ModuleLoader__.load({
       try {
         const url = root ? DATA_URL + '?root=' + encodeURIComponent(root) : DATA_URL
         const res = await fetch(url, { headers: { 'x-filegraph': '1' }, cache: 'no-store' })
-        const json = await res.json()
-        if (!json || json.ok !== true) throw new Error((json && json.error) || '读取失败')
+        const text = await res.text()
+        let json = null
+        try {
+          json = text ? JSON.parse(text) : null
+        } catch {
+          throw new Error('宿主返回的不是 JSON')
+        }
+        if (!json) throw new Error('宿主没有返回数据，先完全退出 DSH 再打开')
+        if (json.ok !== true) throw new Error(json.error || '读取失败')
         state.data = json
         state.error = null
         // 旧宿主没有 flowNodes / 节点组接口：明确报出来，别让用户对着空白画布猜
@@ -184,7 +190,7 @@ window.__ModuleLoader__.load({
       state.confirmReset = false
       state.autoScanned = false
       state.notice = ''
-      state.viewMode = 'flow'
+      state.scopeMode = 'none'
       state.groupStack = []
       notify()
       void load(activeRoot())
@@ -205,8 +211,16 @@ window.__ModuleLoader__.load({
     }
     async function postJson(url, body) {
       const res = await fetch(url, { method: 'POST', headers: POST_HEADERS, body: JSON.stringify(body) })
-      const json = await res.json()
-      if (!json || json.ok !== true) throw new Error((json && json.error) || '操作失败')
+      const text = await res.text()
+      let json = null
+      try {
+        json = text ? JSON.parse(text) : null
+      } catch {
+        throw new Error('宿主返回的不是 JSON')
+      }
+      // 空响应 = 宿主没有这个接口（多半是还挂着旧版宿主）
+      if (!json) throw new Error('宿主没有这个接口，先完全退出 DSH 再打开')
+      if (json.ok !== true) throw new Error(json.error || '操作失败')
       return json
     }
     async function savePath() {
@@ -261,25 +275,12 @@ window.__ModuleLoader__.load({
       }
     }
     /** 拖完直接写绝对坐标（位置只存一份）；先本地生效，宿主那边记内存、按保存/退出/3分钟落盘。 */
-    async function moveNodes(entries, forFiles) {
+    async function moveNodes(entries) {
       if (!entries || Object.keys(entries).length === 0) return
       const merged = { ...state.nodePos }
       for (const [id, pos] of Object.entries(entries)) merged[id] = pos
       state.nodePos = merged
       state.draggingIds = []
-      // 「全部」视图的文件/窗口层：位置照旧走 /filegraph/position
-      if (forFiles) {
-        const positions = {}
-        for (const [id, pos] of Object.entries(entries)) positions[id] = { x: Math.round(pos.x), y: Math.round(pos.y) }
-        try {
-          await postJson(POSITION_URL, { root: activeRoot(), positions })
-        } catch (error) {
-          state.error = String((error && error.message) || error)
-          notify()
-        }
-        notify()
-        return
-      }
       const list = []
       const local = { ...((state.data && state.data.flowPositions) || {}) }
       for (const [canvasId, pos] of Object.entries(entries)) {
@@ -550,13 +551,6 @@ window.__ModuleLoader__.load({
       return { boxes, positions, originX: minX, originY: minY, width: maxX - minX, height: maxY - minY }
     }
 
-    const EXT_COLORS = {
-      ts: '#3b82f6', tsx: '#3b82f6', js: '#f59e0b', jsx: '#f59e0b', mjs: '#f59e0b', cjs: '#f59e0b',
-      json: '#a78bfa', jsonc: '#a78bfa', md: '#22c55e', mdx: '#22c55e',
-      css: '#ec4899', scss: '#ec4899', html: '#f97316', vue: '#22c55e', svelte: '#f97316',
-      py: '#06b6d4', go: '#22d3ee', rs: '#f43f5e', java: '#ef4444',
-      yml: '#eab308', yaml: '#eab308', sh: '#94a3b8', ps1: '#60a5fa',
-    }
 
     /* ------------------------------------------------ 只看局部（链路/关系） */
 
@@ -632,37 +626,6 @@ window.__ModuleLoader__.load({
     }
 
     /** 归框规则：某个非文件节点如果只跟同一个框里的东西有关联，就把它也放进那个框，别另开一个框把线拉乱。 */
-    function regroup(items, edges) {
-      const adj = new Map()
-      const link = (a, b) => {
-        if (!adj.has(a)) adj.set(a, new Set())
-        adj.get(a).add(b)
-      }
-      for (const edge of edges) {
-        link(edge.from, edge.to)
-        link(edge.to, edge.from)
-      }
-      const groupOf = new Map(items.map((item) => [item.id, item.group]))
-      let changed = true
-      let guard = 0
-      while (changed && guard < 12) {
-        changed = false
-        guard += 1
-        for (const item of items) {
-          if (item.kind === 'file') continue // 文件决定框，不搬
-          const neighbors = [...(adj.get(item.id) || [])]
-          if (neighbors.length === 0) continue
-          const groups = new Set(neighbors.map((id) => groupOf.get(id)).filter(Boolean))
-          if (groups.size !== 1) continue
-          const target = [...groups][0]
-          if (target === groupOf.get(item.id)) continue
-          if (target.indexOf('其他来源') === 0) continue // 别把窗口吸进来源框
-          groupOf.set(item.id, target)
-          changed = true
-        }
-      }
-      return items.map((item) => (groupOf.get(item.id) === item.group ? item : { ...item, group: groupOf.get(item.id) }))
-    }
 
     /** 短线标签给人看：动作 + 对象。 */
     function edgeLabelText(edge, byId) {
@@ -768,550 +731,6 @@ window.__ModuleLoader__.load({
 
     /* ============================================================ 画布 A：文件/窗口视图 */
     /** 只读观察层：AI 读过/写过的文件、窗口、其他来源。人拖过的位置存盘。 */
-    function GraphCanvas({ items, edges, selected, onSelect, overrides, onNodesMoved, onNodeDragStart, showEvidence, viewKey, onCut, onRename, onNodeContext, onViewport, modeKey: modeKeyProp }) {
-      const svgRef = useRef(null)
-      const [view, setView] = useState({ k: 1, dx: 0, dy: 0 })
-      const dragRef = useRef(null)
-      const movedRef = useRef(false)
-      const [dragging, setDragging] = useState(null)
-      const edgeEls = useRef(new Map())
-      const handlersRef = useRef({})
-      const cutRef = useRef(null)
-      const hoverEdge = useRef(null)
-
-      const computed = useMemo(() => layout(items, overrides), [items, overrides])
-      const byId = useMemo(() => {
-        const map = new Map()
-        for (const item of items) map.set(item.id, item)
-        return map
-      }, [items])
-      const viewRef = useRef(view)
-      useEffect(() => {
-        viewRef.current = view
-      }, [view])
-      const positionOf = (id) => {
-        if (dragging && dragging.map && dragging.map[id]) return dragging.map[id]
-        return computed.positions.get(id)
-      }
-
-      const linked = useMemo(() => {
-        if (!selected) return null
-        const peer = new Set([selected])
-        for (const edge of edges) {
-          if (edge.from === selected) peer.add(edge.to)
-          if (edge.to === selected) peer.add(edge.from)
-        }
-        return peer
-      }, [edges, selected])
-
-      const boxRef = useRef({ mode: '', x: 0, y: 0, w: 0, h: 0 })
-      const modeKey = modeKeyProp || 'grid|' + (viewKey || '')
-      const boxOriginX = (computed.originX ?? 0) - 2
-      const boxOriginY = (computed.originY ?? 0) - 2
-      const boxW = computed.width + 4
-      const boxH = computed.height + 4
-      const boxOutside =
-        boxOriginX < boxRef.current.x - 1 ||
-        boxOriginY < boxRef.current.y - 1 ||
-        boxOriginX + boxW > boxRef.current.x + boxRef.current.w + 1 ||
-        boxOriginY + boxH > boxRef.current.y + boxRef.current.h + 1
-      if (boxRef.current.mode !== modeKey || boxOutside) {
-        boxRef.current = { mode: modeKey, x: boxOriginX, y: boxOriginY, w: boxW, h: boxH }
-      }
-      const vbX = boxRef.current.x
-      const vbY = boxRef.current.y
-      const vbW = boxRef.current.w
-      const vbH = boxRef.current.h
-
-      const liveBoxes = useMemo(() => {
-        if (!dragging || !computed.boxes.length) return computed.boxes
-        return computed.boxes.map((box) => {
-          let minX = Infinity
-          let minY = Infinity
-          let maxX = -Infinity
-          let maxY = -Infinity
-          for (const item of box.list) {
-            const pos = dragging.map && dragging.map[item.id] ? dragging.map[item.id] : computed.positions.get(item.id)
-            if (!pos) continue
-            minX = Math.min(minX, pos.x)
-            minY = Math.min(minY, pos.y)
-            maxX = Math.max(maxX, pos.x + NODE_W)
-            maxY = Math.max(maxY, pos.y + NODE_H)
-          }
-          if (minX === Infinity) return box
-          return { ...box, x: minX - PAD, y: minY - HEAD, w: maxX - minX + PAD * 2, h: maxY - minY + HEAD + PAD }
-        })
-      }, [computed, dragging])
-
-      useEffect(() => {
-        setView({ k: 1, dx: 0, dy: 0 })
-      }, [modeKey])
-
-      useEffect(() => {
-        if (!onViewport) return
-        onViewport({ x: (vbX + vbW / 2 - (view.dx || 0)) / (view.k || 1), y: (vbY + vbH / 2 - (view.dy || 0)) / (view.k || 1) })
-      }, [view, vbX, vbY, vbW, vbH])
-
-      const viewBoxToUser = useCallback(
-        (clientX, clientY) => {
-          const svg = svgRef.current
-          if (!svg) return { x: 0, y: 0 }
-          const rect = svg.getBoundingClientRect()
-          const scale = Math.min(rect.width / vbW, rect.height / vbH) || 1
-          return { x: (clientX - rect.left) / scale + vbX, y: (clientY - rect.top) / scale + vbY }
-        },
-        [vbW, vbH, vbX, vbY],
-      )
-      const localOf = (event) => {
-        const raw = viewBoxToUser(event.clientX, event.clientY)
-        const v = viewRef.current
-        return { x: (raw.x - (v.dx || 0)) / (v.k || 1), y: (raw.y - (v.dy || 0)) / (v.k || 1) }
-      }
-
-      useEffect(() => {
-        const svg = svgRef.current
-        if (!svg) return undefined
-        const onWheel = (event) => {
-          event.preventDefault()
-          const point = viewBoxToUser(event.clientX, event.clientY)
-          setView((current) => {
-            const next = Math.min(32, Math.max(0.12, current.k * Math.exp(-event.deltaY * 0.0015)))
-            const ratio = next / current.k
-            return { k: next, dx: point.x - (point.x - current.dx) * ratio, dy: point.y - (point.y - current.dy) * ratio }
-          })
-        }
-        svg.addEventListener('wheel', onWheel, { passive: false })
-        return () => svg.removeEventListener('wheel', onWheel)
-      }, [viewBoxToUser])
-
-      useEffect(() => {
-        const onMove = (event) => {
-          const drag = dragRef.current
-          const svg = svgRef.current
-          if (!drag || !svg) return
-          const rect = svg.getBoundingClientRect()
-          const scale = Math.min(rect.width / vbW, rect.height / vbH) || 1
-          const dx = event.clientX - drag.x
-          const dy = event.clientY - drag.y
-          if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true
-          const k = viewRef.current.k || 1
-          if (drag.mode === 'scissor') {
-            const { x: lx, y: ly } = localOf(event)
-            drag.cutTo = { x: lx, y: ly }
-            const cut = cutRef.current
-            if (cut) {
-              cut.setAttribute('x2', String(lx))
-              cut.setAttribute('y2', String(ly))
-            }
-            return
-          }
-          if (drag.mode === 'node') {
-            const nx = Math.round(drag.baseX + dx / (scale * k))
-            const ny = Math.round(drag.baseY + dy / (scale * k))
-            drag.result = { [drag.id]: { x: nx, y: ny } }
-            if (drag.el && drag.el.setAttribute) drag.el.setAttribute('transform', 'translate(' + nx + ' ' + ny + ')')
-            return
-          }
-          if (drag.mode === 'box') {
-            const result = {}
-            for (const [id, base] of Object.entries(drag.bases)) {
-              result[id] = { x: Math.round(base.x + dx / (scale * k)), y: Math.round(base.y + dy / (scale * k)) }
-            }
-            drag.result = result
-            setDragging({ map: result })
-            return
-          }
-          setView((current) => ({ k: current.k, dx: drag.dx + dx / scale, dy: drag.dy + dy / scale }))
-        }
-        const onUp = () => {
-          const drag = dragRef.current
-          dragRef.current = null
-          if (!drag) return
-          if (drag.mode === 'scissor') {
-            const cut = cutRef.current
-            if (cut) cut.style.opacity = '0'
-            const a = { x: drag.sx, y: drag.sy }
-            const b = drag.cutTo || a
-            const hitList = []
-            for (const [key, el] of edgeEls.current) {
-              if (!el || typeof el.getTotalLength !== 'function') continue
-              const total = el.getTotalLength()
-              if (!total) continue
-              const steps = Math.max(12, Math.min(120, Math.round(total / 24)))
-              let prev = el.getPointAtLength(0)
-              let crossed = false
-              for (let i = 1; i <= steps; i += 1) {
-                const pt = el.getPointAtLength((total * i) / steps)
-                if (segmentsCross(a, b, { x: prev.x, y: prev.y }, { x: pt.x, y: pt.y }) || pointSegDistance(pt, a, b) < 4) {
-                  crossed = true
-                  break
-                }
-                prev = pt
-              }
-              if (!crossed) continue
-              const edge = el.__fgEdge
-              if (edge && onCut) hitList.push(edge)
-            }
-            if (hitList.length > 0 && onCut) onCut(hitList)
-            return
-          }
-          if (drag.mode === 'node' || drag.mode === 'box') {
-            const result = drag.result
-            setDragging(null)
-            if (result && Object.keys(result).length > 0) onNodesMoved(result, false)
-            else onNodeDragStart([])
-          }
-        }
-        handlersRef.current = { onMove, onUp }
-        window.addEventListener('pointermove', onMove)
-        window.addEventListener('pointerup', onUp)
-        window.addEventListener('pointercancel', onUp)
-        return () => {
-          window.removeEventListener('pointermove', onMove)
-          window.removeEventListener('pointerup', onUp)
-          window.removeEventListener('pointercancel', onUp)
-        }
-      }, [vbW, vbH, onNodesMoved])
-
-      const clearEdgeHover = () => {
-        const cur = hoverEdge.current
-        if (!cur) return
-        if (cur.stroke === null) cur.el.removeAttribute('stroke')
-        else cur.el.setAttribute('stroke', cur.stroke)
-        hoverEdge.current = null
-        if (svgRef.current) svgRef.current.style.cursor = 'grab'
-      }
-
-      const highlightEdgeAt = (event) => {
-        const { x: lx, y: ly } = localOf(event)
-        const kk = viewRef.current.k || 1
-        let best = null
-        let bestDist = Infinity
-        for (const edge of edges) {
-          const f = positionOf(edge.from)
-          const t = positionOf(edge.to)
-          if (!f || !t) continue
-          const meta = pairInfo.get(edge) || { index: 0, count: 1 }
-          const pts = bezierPoints(f, t, meta.index, meta.count)
-          for (let i = 0; i < pts.length - 1; i += 1) {
-            const d = pointSegDistance({ x: lx, y: ly }, pts[i], pts[i + 1])
-            if (d < bestDist) {
-              bestDist = d
-              best = { edge, key: edge.from + '|' + edge.to + '|' + meta.index + '|' + meta.count }
-            }
-          }
-        }
-        const threshold = 8 / kk
-        const el = best ? edgeEls.current.get(best.key) : null
-        if (!best || !el || bestDist > threshold) {
-          clearEdgeHover()
-          return null
-        }
-        if (hoverEdge.current && hoverEdge.current.el === el) return best.edge
-        clearEdgeHover()
-        hoverEdge.current = { el, stroke: el.getAttribute('stroke') }
-        el.setAttribute('stroke', '#111827')
-        return best.edge
-      }
-
-      const startPan = (event) => {
-        if (event.button !== 0) return
-        movedRef.current = false
-        if (onSelect) onSelect(null)
-        dragRef.current = { mode: 'pan', x: event.clientX, y: event.clientY, dx: view.dx, dy: view.dy }
-      }
-
-      const startBoxDrag = (event, box) => {
-        if (event.button !== 0) return
-        event.stopPropagation()
-        movedRef.current = false
-        const bases = {}
-        for (const item of box.list) {
-          const pos = computed.positions.get(item.id)
-          if (pos) bases[item.id] = pos
-        }
-        if (Object.keys(bases).length === 0) return
-        dragRef.current = { mode: 'box', x: event.clientX, y: event.clientY, bases }
-        onNodeDragStart(Object.keys(bases))
-      }
-
-      const pairInfo = useMemo(() => {
-        const byPair = new Map()
-        for (const edge of edges) {
-          const key = edge.from < edge.to ? edge.from + '|' + edge.to : edge.to + '|' + edge.from
-          if (!byPair.has(key)) byPair.set(key, [])
-          byPair.get(key).push(edge)
-        }
-        const info = new Map()
-        for (const list of byPair.values()) list.forEach((edge, index) => info.set(edge, { index, count: list.length }))
-        return info
-      }, [edges])
-
-      const edgeGeometry = (edge) => {
-        if (edge.from === edge.to) {
-          const p0 = positionOf(edge.from)
-          if (!p0) return null
-          const x1 = p0.x + NODE_W
-          const y1 = p0.y + NODE_H / 2
-          const x2 = p0.x
-          const y2 = p0.y + NODE_H / 2
-          return {
-            d: 'M' + x1 + ' ' + y1 + ' C' + (x1 + 46) + ' ' + (y1 - 34) + ', ' + (x2 - 46) + ' ' + (y2 - 34) + ', ' + x2 + ' ' + y2,
-            mx: (x1 + x2) / 2,
-            my: y1 - 30,
-            active: !linked || (linked.has(edge.from) && linked.has(edge.to)),
-          }
-        }
-        const from = positionOf(edge.from)
-        const to = positionOf(edge.to)
-        if (!from || !to) return null
-        const x1 = from.x + NODE_W
-        const y1 = from.y + NODE_H / 2
-        const x2 = to.x
-        const y2 = to.y + NODE_H / 2
-        const bend = Math.max(36, Math.abs(x2 - x1) * 0.45)
-        const meta = pairInfo.get(edge) || { index: 0, count: 1 }
-        const offset = meta.count > 1 ? (meta.index - (meta.count - 1) / 2) * 34 : 0
-        const vx = x2 - x1
-        const vy = y2 - y1
-        const len = Math.sqrt(vx * vx + vy * vy) || 1
-        const nx = (-vy / len) * offset
-        const ny = (vx / len) * offset
-        const c1x = x1 + bend + nx
-        const c1y = y1 + ny
-        const c2x = x2 - bend + nx
-        const c2y = y2 + ny
-        const t = meta.count > 1 ? 0.3 + (0.4 * meta.index) / (meta.count - 1) : 0.5
-        const u = 1 - t
-        const px = u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2
-        const py = u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2
-        return {
-          d: 'M' + x1 + ' ' + y1 + ' C' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + x2 + ' ' + y2,
-          mx: px,
-          my: py,
-          active: !linked || (linked.has(edge.from) && linked.has(edge.to)),
-        }
-      }
-
-      return h('div',
-        { style: { position: 'relative', flex: 1, minHeight: 0, background: 'var(--dsw-alias-bg-base)', userSelect: 'none', WebkitUserSelect: 'none' } },
-        h('svg',
-          {
-            ref: svgRef,
-            viewBox: vbX + ' ' + vbY + ' ' + vbW + ' ' + vbH,
-            preserveAspectRatio: 'xMinYMin meet',
-            style: { width: '100%', height: '100%', display: 'block', cursor: 'grab', touchAction: 'none', overflow: 'hidden', userSelect: 'none', WebkitUserSelect: 'none' },
-            onDragStart: (event) => event.preventDefault(),
-            onPointerDown: (event) => {
-              try {
-                if (event.currentTarget && event.currentTarget.setPointerCapture) event.currentTarget.setPointerCapture(event.pointerId)
-              } catch {}
-              if (event.ctrlKey) {
-                const direct = highlightEdgeAt(event)
-                if (direct && onCut) {
-                  onCut([direct])
-                  return
-                }
-                const { x: lx, y: ly } = localOf(event)
-                dragRef.current = { mode: 'scissor', sx: lx, sy: ly, cutTo: { x: lx, y: ly } }
-                const cut = cutRef.current
-                if (cut) {
-                  cut.setAttribute('x1', String(lx))
-                  cut.setAttribute('y1', String(ly))
-                  cut.setAttribute('x2', String(lx))
-                  cut.setAttribute('y2', String(ly))
-                  cut.style.opacity = '1'
-                }
-                return
-              }
-              if (event.shiftKey && !event.ctrlKey) {
-                const target = event.target
-                const direct = target && target.__fgEdge ? target.__fgEdge : null
-                const onLine = target && target.tagName && target.tagName.toLowerCase() === 'path'
-                const onBlank = target === event.currentTarget
-                const edge = direct || (onLine || onBlank ? highlightEdgeAt(event) : null)
-                if (edge && onRename) {
-                  onRename(edge)
-                  return
-                }
-                return
-              }
-              startPan(event)
-            },
-            onPointerMove: (event) => {
-              if (event.shiftKey && !dragRef.current) highlightEdgeAt(event)
-              else if (!dragRef.current) clearEdgeHover()
-              if (handlersRef.current.onMove) handlersRef.current.onMove(event)
-            },
-            onPointerUp: () => handlersRef.current.onUp && handlersRef.current.onUp(),
-          },
-          h('defs',
-            null,
-            ['#94a3b8', IN_COLOR, OUT_COLOR, SOURCE_COLOR, WINDOW_COLOR].map((color, index) =>
-              h('marker',
-                { key: 'm' + index, id: 'fg-arrow-' + index, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' },
-                h('path', { d: 'M0 0 L8 4 L0 8 z', fill: color }),
-              ),
-            ),
-          ),
-          h('g',
-            { transform: 'translate(' + view.dx + ' ' + view.dy + ') scale(' + view.k + ')' },
-            h('line', {
-              ref: cutRef,
-              x1: 0, y1: 0, x2: 0, y2: 0,
-              stroke: '#ef4444', strokeWidth: 1.4, strokeDasharray: '2 3',
-              style: { opacity: 0, pointerEvents: 'none' },
-            }),
-            liveBoxes.map((box) =>
-              h('g',
-                { key: 'box:' + box.key },
-                h('rect', {
-                  x: box.x, y: box.y, width: box.w, height: box.h, rx: 10,
-                  fill: box.rank === 0 ? 'rgba(139,92,246,0.10)' : box.rank === 1 ? 'rgba(245,158,11,0.10)' : 'var(--dsw-alias-bg-layer-2)',
-                  fillOpacity: 0.55,
-                  stroke: box.rank === 0 ? WINDOW_COLOR : box.rank === 1 ? SOURCE_COLOR : 'var(--dsw-alias-border-l2)',
-                  strokeOpacity: 0.95, strokeWidth: 1.3,
-                  style: { cursor: 'move' },
-                  onPointerDown: (event) => startBoxDrag(event, box),
-                }),
-                h('text', { x: box.x + PAD, y: box.y + 15, fontSize: 11, fill: 'var(--dsw-alias-label-secondary)', style: { userSelect: 'none' } }, box.key + '/  ' + box.list.length),
-              ),
-            ),
-            edges.map((edge, index) => {
-              const geometry = edgeGeometry(edge)
-              if (!geometry) return null
-              const style = EDGE_STYLE[edge.kind] || EDGE_STYLE.ref
-              const markerIndex = edge.kind === 'in' ? 1 : edge.kind === 'out' ? 2 : edge.kind === 'src' ? 3 : 0
-              const fromLabel = byId.get(edge.from)
-              const toLabel = byId.get(edge.to)
-              const evidence = showEvidence === false ? undefined : edge.evidence
-              const roleText = evidence ? { import: '依赖', link: '文档链接', mention: '提到' }[evidence.role] || '提到' : ''
-              const title = evidence
-                ? (fromLabel ? fromLabel.label : edge.from) + ' → ' + (toLabel ? toLabel.label : edge.to) + '\n' + roleText + '：' + evidence.snippet + '（第 ' + evidence.line + ' 行）'
-                : (fromLabel ? fromLabel.label : edge.from) + ' → ' + (toLabel ? toLabel.label : edge.to)
-              const label = edgeLabelText(edge, byId)
-              return h('g',
-                { key: 'edge:' + index, opacity: geometry.active ? 1 : 0.32 },
-                h('path', {
-                  d: geometry.d, fill: 'none', stroke: 'transparent', strokeWidth: 14, strokeLinecap: 'round',
-                  style: { cursor: 'pointer' },
-                  onPointerDown: (event) => {
-                    event.stopPropagation()
-                    if (event.shiftKey && onRename) {
-                      onRename(edge)
-                      return
-                    }
-                    if (onSelect) onSelect(null)
-                  },
-                }),
-                h('path', {
-                  ref: (el) => {
-                    const key = edge.from + '|' + edge.to + '|' + (pairInfo.get(edge)?.index || 0) + '|' + (pairInfo.get(edge)?.count || 1)
-                    if (el) {
-                      edgeEls.current.set(key, el)
-                      el.__fgEdge = edge
-                    } else {
-                      edgeEls.current.delete(key)
-                    }
-                  },
-                  d: geometry.d, fill: 'none',
-                  stroke: geometry.active && linked ? 'var(--dsw-alias-brand-primary)' : style.color,
-                  strokeOpacity: geometry.active ? 0.9 : 0.12,
-                  strokeWidth: geometry.active ? style.width : 1,
-                  strokeDasharray: style.dash,
-                  strokeLinecap: 'round',
-                  markerEnd: geometry.active ? 'url(#fg-arrow-' + markerIndex + ')' : undefined,
-                  style: { pointerEvents: 'none' },
-                }),
-                h('title', null, title),
-                label
-                  ? h('text', {
-                      ref: (el) => { if (el) el.__fgEdge = edge },
-                      x: geometry.mx, y: geometry.my - 6, textAnchor: 'middle', fontSize: 9.5,
-                      fill: 'var(--dsw-alias-label-secondary)',
-                      style: { userSelect: 'none', paintOrder: 'stroke', stroke: 'var(--dsw-alias-bg-base)', strokeWidth: 3, strokeLinejoin: 'round' },
-                    }, label)
-                  : null,
-              )
-            }),
-            items.map((item) => {
-              const pos = positionOf(item.id)
-              if (!pos) return null
-              const isSelected = item.id === selected
-              const faded = linked ? !linked.has(item.id) : false
-              const isWindow = item.kind === 'window'
-              const isSource = item.kind === 'source'
-              const isDraggingThis = !!(dragging && dragging.map && dragging.map[item.id])
-              return h('g',
-                {
-                  key: 'node:' + item.id,
-                  transform: 'translate(' + pos.x + ' ' + pos.y + ')',
-                  opacity: faded ? 0.28 : 1,
-                  style: { cursor: isDraggingThis ? 'grabbing' : 'grab' },
-                  onPointerDown: (event) => {
-                    if (event.button !== 0) return
-                    event.stopPropagation()
-                    if (event.shiftKey) {
-                      if (onRename) onRename(item)
-                      return
-                    }
-                    const base = computed.positions.get(item.id)
-                    if (!base) return
-                    movedRef.current = false
-                    const anchor = positionOf(item.id) || base
-                    dragRef.current = { mode: 'node', id: item.id, x: event.clientX, y: event.clientY, baseX: anchor.x, baseY: anchor.y, el: event.currentTarget }
-                    onNodeDragStart([item.id])
-                  },
-                  onContextMenu: (event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (onNodeContext) onNodeContext(item.id, event.clientX, event.clientY)
-                  },
-                  onClick: (event) => {
-                    event.stopPropagation()
-                    if (movedRef.current) {
-                      movedRef.current = false
-                      return
-                    }
-                    onSelect(item.id)
-                  },
-                },
-                h('title', null,
-                  item.kind === 'file'
-                    ? item.path
-                    : item.kind === 'window'
-                      ? (item.windowGroup || '未标分工') + (item.windowLabel ? ' / ' + item.windowLabel : '')
-                      : '其他来源：' + item.label),
-                h('rect', {
-                  width: NODE_W, height: NODE_H, rx: 7,
-                  fill: isWindow ? 'rgba(139,92,246,0.10)' : isSource ? 'rgba(245,158,11,0.10)' : 'var(--dsw-alias-bg-layer-2)',
-                  stroke: isSelected ? 'var(--dsw-alias-brand-primary)' : isWindow ? WINDOW_COLOR : isSource ? SOURCE_COLOR : 'var(--dsw-alias-border-l2)',
-                  strokeWidth: isSelected ? 2 : 1,
-                }),
-                h('circle', { cx: NODE_W - 5, cy: NODE_H / 2, r: 4.5, fill: 'var(--dsw-alias-bg-base)', stroke: OUT_COLOR, strokeWidth: 1.5 }),
-                h('circle', { cx: 5, cy: NODE_H / 2, r: 4.5, fill: 'var(--dsw-alias-bg-base)', stroke: IN_COLOR, strokeWidth: 1.5 }),
-                isWindow
-                  ? h('rect', { x: 6, y: 9, width: 12, height: 9, rx: 2, fill: 'none', stroke: WINDOW_COLOR, strokeWidth: 1.2 })
-                  : isSource
-                    ? h('circle', { cx: 12, cy: NODE_H / 2, r: 4.5, fill: 'none', stroke: SOURCE_COLOR, strokeWidth: 1.4 })
-                    : h('circle', { cx: 12, cy: NODE_H / 2, r: 4, fill: item.color }),
-                isWindow ? h('rect', { x: 4.5, y: 19, width: 15, height: 1.4, rx: 0.7, fill: WINDOW_COLOR }) : null,
-                h('text', { x: 24, y: NODE_H / 2 + 4, fontSize: 11, fill: 'var(--dsw-alias-label-primary)', style: { userSelect: 'none' } }, shortName(item.label)),
-                item.badge
-                  ? h('text', { x: NODE_W - 8, y: NODE_H / 2 + 4, fontSize: 9, textAnchor: 'end', fill: 'var(--dsw-alias-label-secondary)', style: { userSelect: 'none' } }, item.badge)
-                  : null,
-              )
-            }),
-          ),
-        ),
-        h('div',
-          { style: { position: 'absolute', right: 10, bottom: 10, display: 'flex', gap: 6 } },
-          zoomButton('－', () => setView((v) => ({ ...v, k: Math.max(0.12, v.k / 1.3) }))),
-          zoomButton('＋', () => setView((v) => ({ ...v, k: Math.min(32, v.k * 1.3) }))),
-          zoomButton('适应', () => setView({ k: 1, dx: 0, dy: 0 })),
-        ),
-      )
-    }
 
     /* ============================================================ 画布 B：关系画布（节点 / 节点组） */
 
@@ -1935,7 +1354,7 @@ window.__ModuleLoader__.load({
     const ghostButton = { height: 28, padding: '0 10px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, cursor: 'pointer' }
     const inputStyle = { width: '100%', height: 26, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, boxSizing: 'border-box' }
 
-    function Details({ item, items, edges, onSelect, mode, onMode, showEvidence, note, onNoteChange, simple, onOpenGroup }) {
+    function Details({ item, items, edges, mode, onMode, note, onNoteChange, onOpenGroup }) {
       const byId = useMemo(() => {
         const map = new Map()
         for (const entry of items) map.set(entry.id, entry)
@@ -1955,75 +1374,11 @@ window.__ModuleLoader__.load({
       const row = (label, value) =>
         h('div', { style: { display: 'flex', gap: 8, fontSize: 11, lineHeight: '18px' } }, h('span', { style: { color: 'var(--dsw-alias-label-secondary)', minWidth: 46 } }, label), h('span', { style: { color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all' } }, value),)
 
-      const section = (title, list, emptyText) =>
-        h('div',
-          { style: { marginTop: 12 } },
-          h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, title),
-          h('div',
-            { style: { marginTop: 4 } },
-            list.length === 0
-              ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, emptyText)
-              : list.map((edge) => {
-                  const peer = byId.get(edge.peer)
-                  const evidence = showEvidence === false ? undefined : edge.evidence
-                  const roleText = evidence
-                    ? { import: '依赖', link: '文档链接', mention: '提到' }[evidence.role] || '提到'
-                    : ''
-
-                  return h('div',
-                    { key: edge.kind + ':' + edge.peer, style: { marginBottom: evidence ? 4: 2 } },
-                    h('button',
-                      {
-                        onClick: () => onSelect(edge.peer),
-                        title: evidence
-                          ? peer
-                            ? peer.label + '\n' + evidence.snippet + '（第 ' + evidence.line + ' 行）'
-                            : evidence.snippet
-                          : peer
-                            ? peer.label
-                            : edge.peer,
-                        style: { display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', padding: '3px 6px', borderRadius: 6, border: '1px solid transparent', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', boxSizing: 'border-box', },
-                      },
-                      h('span', {
-                        style: { display: 'inline-block', flex: '0 0 auto', width: 6, height: 6, borderRadius: 3, background: (EDGE_STYLE[edge.kind] || EDGE_STYLE.ref).color, },
-                      }),
-                      h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, peer ? peer.label : edge.peer),
-                      evidence
-                        ? h('span',
-                            {
-                              style: { marginLeft: 'auto', flex: '0 0 auto', fontSize: 9, color: 'var(--dsw-alias-label-secondary)', },
-                            },
-                            roleText + ' L' + evidence.line,
-                          )
-                        : null,
-                    ),
-                    evidence && evidence.snippet
-                      ? h('div',
-                          {
-                            title: evidence.snippet,
-                            style: { fontSize: 9, lineHeight: '13px', color: 'var(--dsw-alias-label-secondary)', paddingLeft: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', },
-                          },
-                          evidence.snippet,
-                        )
-                      : null,
-                  )
-                }),
-          ),
-        )
-
-      const outgoing = edges
-        .filter((edge) => edge.from === item.id)
-        .map((edge) => ({ peer: edge.to, kind: edge.kind, evidence: edge.evidence }))
-      const incoming = edges
-        .filter((edge) => edge.to === item.id)
-        .map((edge) => ({ peer: edge.from, kind: edge.kind, evidence: edge.evidence }))
-      const outEdges = outgoing.filter((edge) => edge.kind === 'out')
-      const inEdges = incoming.filter((edge) => edge.kind === 'in')
-
       const noteBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 } },
-        h('div', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, '这个节点是干什么用的'),
+        h('div', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, '节点功能描述'),
         h('textarea', {
           defaultValue: note || '',
+          placeholder: '（这个节点做什么用）',
           rows: 3,
           spellCheck: false,
           onChange: (event) => {
@@ -2051,12 +1406,11 @@ window.__ModuleLoader__.load({
           style: { width: '100%', resize: 'vertical', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, padding: '6px 8px', fontFamily: 'inherit', },
         }),
       )
-      if (simple) {
         const upstream = edges.filter((edge) => edge.to === item.id).map((edge) => ({ label: (byId.get(edge.from) || {}).label || edge.from, verb: edge.verb || '' }))
         const downstream = edges.filter((edge) => edge.from === item.id).map((edge) => ({ label: (byId.get(edge.to) || {}).label || edge.to, verb: edge.verb || '' }))
         return h('div',
-          {
-            style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', gap: 8, },
+        {
+          style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', gap: 8, },
           },
           noteBox,
           h('div',
@@ -2082,7 +1436,6 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          h('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, item.label),
           item.kind === 'group'
             ? h('button', {
                 onClick: () => onOpenGroup && onOpenGroup(item.id),
@@ -2094,141 +1447,21 @@ window.__ModuleLoader__.load({
                 '输入：' + ((item.inputs || []).filter(Boolean).join('、') || '（无）') + '\n' +
                 '输出：' + ((item.outputs || []).filter(Boolean).join('、') || '（无）'))
             : null,
-          h('div', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, '它用到 / 被谁用到'),
-          upstream.length === 0 && downstream.length === 0
-            ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '还没有连线')
-            : h('div',
-                { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-                upstream.map((row) =>
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, '输入（从哪来）'),
+            upstream.length === 0
+              ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '（无）')
+              : upstream.map((row) =>
                   h('div', { key: 'up:' + row.label, style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '← ' + row.label + (row.verb ? '（' + row.verb + '）' : '')),
                 ),
-                downstream.map((row) =>
+            h('div', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)', marginTop: 4 } }, '输出（到哪去）'),
+            downstream.length === 0
+              ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '（无）')
+              : downstream.map((row) =>
                   h('div', { key: 'down:' + row.label, style: { fontSize: 11, color: 'var(--dsw-alias-label-primary)' } }, '→ ' + row.label + (row.verb ? '（' + row.verb + '）' : '')),
                 ),
-              ),
-        )
-      }
-      return h('div',
-        {
-          style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', },
-        },
-        noteBox,
-        h('div',
-          { style: { display: 'flex', gap: 4, marginBottom: 10 } },
-          [
-            ['全部', 'all'],
-            ['此节点关系', 'ego'],
-            ['此节点链路', 'chain'],
-          ].map(([label, value]) =>
-            h('button',
-              {
-                key: value,
-                onClick: () => onMode(value),
-                title:
-                  value === 'ego'
-                    ? '只显示这个节点 + 直接上游 + 直接下游，横向排'
-                    : value === 'chain'
-                      ? '上游整条链路 + 一层下游'
-                      : '显示整张图',
-                style: { flex: 1, height: 24, padding: '0 6px', borderRadius: 6, border: '1px solid ' + (mode === value ? 'var(--dsw-alias-brand-primary)': 'var(--dsw-alias-border-l1)'), background: mode === value ? 'var(--dsw-alias-brand-primary)': 'transparent', color: mode === value ? '#fff': 'var(--dsw-alias-label-secondary)', fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap', },
-              },
-              label,
-            ),
           ),
-        ),
-        h('div',
-          { style: { fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-all' } },
-          item.kind === 'file' ? item.path : item.label,
-        ),
-        item.kind === 'file' ? row('目录', item.dir || '.') : null,
-        item.kind === 'window' ? row('会话', shortId(item.windowId)) : null,
-        item.kind === 'window'
-          ? row('分工（组名）', item.windowGroup || '未标')
-          : null,
-        item.kind === 'source' ? row('次数', String(item.count || 0)) : null,
-        item.kind === 'file' ? row('写入', String(item.writes || 0) + ' 次') : null,
-        item.kind === 'file' ? row('读入', String(item.reads || 0) + ' 次') : null,
-        item.kind === 'window' ? row('写出', String(item.outputs.length) + ' 个文件') : null,
-        item.kind === 'window' ? row('读入', String(item.inputs.length) + ' 个文件') : null,
-        item.kind === 'file' ? row('大小', formatSize(item.size)) : null,
-        row('更新', formatTime(item.lastAt)),
-        item.kind === 'file' ? row('首次', formatTime(item.firstAt)) : null,
-
-        item.kind === 'window'
-          ? h('div',
-              { style: { marginTop: 12 } },
-              state.editing
-                ? h('div',
-                    { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-                    h('input', {
-                      value: state.draftGroup,
-                      autoFocus: true,
-                      placeholder: '输入端 / 思考端 / 输出端…',
-                      onChange: (event) => {
-                        state.draftGroup = event.target.value
-                        notify()
-                      },
-                      style: inputStyle,
-                    }),
-                    h('input', {
-                      value: state.draftName,
-                      placeholder: '例如 私信窗口',
-                      onChange: (event) => {
-                        state.draftName = event.target.value
-                        notify()
-                      },
-                      onKeyDown: (event) => {
-                        if (event.key === 'Enter') void saveWindow(item.windowId)
-                        if (event.key === 'Escape') {
-                          state.editing = false
-                          notify()
-                        }
-                      },
-                      style: inputStyle,
-                    }),
-                    h('div',
-                      { style: { display: 'flex', gap: 6 } },
-                      h('button', { onClick: () => void saveWindow(item.windowId), style: primaryButton }, '保存'),
-                      h('button',
-                        {
-                          onClick: () => {
-                            state.editing = false
-                            notify()
-                          },
-                          style: ghostButton,
-                        },
-                        '取消',
-                      ),
-                    ),
-                  )
-                : h('button',
-                    {
-                      onClick: () => {
-                        state.editing = true
-                        state.draftGroup = item.windowGroup || ''
-                        state.draftName = item.windowLabel || ''
-                        notify()
-                      },
-                      style: ghostButton,
-                    },
-                    '改分工 / 名字',
-                  ),
-            )
-          : null,
-
-        item.kind === 'window' ? section('写出的文件', outEdges, '还没有写出') : null,
-        item.kind === 'window' ? section('读入的文件', inEdges, '还没有读入') : null,
-        item.kind === 'window' ? section('取数的来源', incoming.filter((edge) => edge.kind === 'src'), '没有从其他来源取数') : null,
-        item.kind === 'source' ? section('取数的窗口', outgoing, '还没有窗口用它') : null,
-
-        item.kind === 'file'
-          ? h('div',
-              null,
-              section('读它的窗口', outgoing.filter((edge) => edge.kind === 'in'), '还没有窗口读它'),
-              section('写它的窗口', incoming.filter((edge) => edge.kind === 'out'), '还没有窗口写它'),
-            )
-          : null,
-      )
+        )
     }
 
     /* --------------------------------------------------- 设置条 */
@@ -2806,6 +2039,21 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 一键画一套工作流模板（presets/*.json）：主干一条线 + 侧枝。 */
+    async function applyPreset() {
+      try {
+        const json = await postJson('/filegraph/preset', { action: 'apply' })
+        await load(undefined)
+        // payload 里也有 nodes/edges（文件层），模板数量要用 presetNodes/presetEdges，别撞名
+        state.notice = '已添加「' + ((json && json.presetName) || '工作流预设') + '」：' +
+          ((json && json.presetNodes) || 0) + ' 个节点 / ' + ((json && json.presetEdges) || 0) + ' 条关系'
+        notify()
+      } catch (error) {
+        state.error = String((error && error.message) || error)
+        notify()
+      }
+    }
+
     async function addGroupNode() {
       const parent = openGroupId()
       const spot = freeSpotNear(200, 66)
@@ -3027,75 +2275,6 @@ window.__ModuleLoader__.load({
     function GraphPanel() {
       const current = useStore()
       const data = current.data
-      const nodes = (data && data.nodes) || []
-      const windows = (data && data.windows) || []
-      const sources = (data && data.sources) || []
-      const showWindows = current.showWindows
-
-      const items = useMemo(() => {
-        const out = nodes.map((node) => ({
-          id: 'file:' + node.path,
-          kind: 'file',
-          path: node.path,
-          label: node.name,
-          dir: node.dir || '',
-          group: node.dir || '.',
-          groupRank: 2,
-          color: EXT_COLORS[node.ext] || '#94a3b8',
-          writes: node.writes || 0,
-          reads: node.reads || 0,
-          size: node.size,
-          firstAt: node.firstAt,
-          lastAt: node.lastAt,
-          badge: node.writes > 1 ? String(node.writes) : '',
-        }))
-        if (showWindows) {
-          for (const win of windows) {
-            // 组名（分工）就是这个窗口的"名字"：能说清它是干嘛的，优先显示。
-            const group = win.group || ''
-            const name = win.label || ''
-            const index = win.index || 0
-            const label = group
-              ? group + (name ? ' · ' + name : ' · 窗口' + index)
-              : name
-                ? name + ' · 窗口' + index
-                : '窗口 ' + index + ' · 未标分工'
-            out.push({
-              id: 'win:' + win.id,
-              kind: 'window',
-              windowId: win.id,
-              windowLabel: name,
-              windowGroup: group,
-              label,
-              group: '窗口组 · ' + (group || '未分组'),
-              groupRank: 0,
-              color: WINDOW_COLOR,
-              writes: win.writes || 0,
-              reads: win.reads || 0,
-              inputs: win.inputs || [],
-              outputs: win.outputs || [],
-              firstAt: win.firstAt,
-              lastAt: win.lastAt,
-            })
-          }
-          for (const source of sources) {
-            out.push({ id: 'src:' + source.key, kind: 'source', sourceKey: source.key, label: source.label || source.key, group: '其他来源', groupRank: 1, color: SOURCE_COLOR, count: source.count || 0, firstAt: source.firstAt, lastAt: source.lastAt })
-          }
-        }
-        return out
-      }, [nodes, windows, sources, showWindows])
-
-      const edges = useMemo(() => {
-        if (!data || !data.edges) return []
-        // 「提到」（正文里出现文件名）不算项目关系，一律不画。
-        let list = data.edges.filter((edge) => edge.kind !== 'ref')
-        if (!showWindows) list = list.filter((edge) => edge.kind === 'seq' || edge.kind === 'verb')
-        return list
-      }, [data, showWindows])
-
-      // 「关系信息」开关：只决定"要不要显示这条关系的证据（行号/原句/作用）"，
-      // 不参与拓扑——关掉线还在，链路照旧连通。
-      const scopedEdges = edges
 
       // 打开的是哪个节点组（栈顶）；没有就是主画布。
       const group = current.groupStack && current.groupStack.length > 0
@@ -3104,7 +2283,7 @@ window.__ModuleLoader__.load({
 
       // 关系画布：节点各自有 id；节点信息按名字存（同名节点共用备注）。
       const flowModel = useMemo(() => {
-        if (current.viewMode !== 'flow' || !data) return null
+        if (!data) return null
         if (group) {
           const list = (group.nodes || []).map((node) => ({
             id: 'f:' + node.id,
@@ -3152,13 +2331,11 @@ window.__ModuleLoader__.load({
         const kindOf = new Map(list.map((item) => [item.nodeId, item.kind]))
         const edgeList = spreadPorts(data.flows || [], kindOf)
         return { items: list, edges: edgeList, positions, inGroup: false }
-      }, [current.viewMode, data, current.groupStack, group])
+      }, [data, current.groupStack, group])
 
-      const finalItems = useMemo(() => regroup(items, scopedEdges), [items, scopedEdges])
-
-      // 当前"底图"：关系视图用画布，其它用文件/窗口层。
-      const baseItems = flowModel ? flowModel.items : finalItems
-      const baseEdges = flowModel ? flowModel.edges : scopedEdges
+      // 只有这一张画布了：节点 / 关系 / 节点组。
+      const baseItems = flowModel ? flowModel.items : []
+      const baseEdges = flowModel ? flowModel.edges : []
 
       const selectedItem = current.selected
         ? baseItems.find((item) => item.id === current.selected)
@@ -3212,8 +2389,13 @@ window.__ModuleLoader__.load({
             positions[item.id] = { x: 60 + columnIndex * 260, y: 60 + rowIndex * 96 }
           })
         })
+        // 筛选模式下的拖动只改显示（scopeDrags），不写进文件位置
+        const tweak = current.scopeDrags || {}
+        for (const id of Object.keys(positions)) {
+          if (tweak[id]) positions[id] = { x: tweak[id].x, y: tweak[id].y }
+        }
         return positions
-      }, [scope, flowModel])
+      }, [scope, flowModel, current.scopeDrags])
 
       const groupStack = current.groupStack || []
       const groupPath = groupStack.map((id) => (((data && data.groups) || {})[id] || {}).name || '节点组')
@@ -3452,9 +2634,7 @@ window.__ModuleLoader__.load({
                 style: { flex: 1, minWidth: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' },
               },
               (data && data.active ? data.active.graphFile : '尚未记录') +
-                (current.viewMode === 'flow'
-                  ? '   ·   ' + ((data && data.flowNodes) || []).length + ' 节点 / ' + ((data && data.flows) || []).length + ' 关系 / ' + Object.keys((data && data.groups) || {}).length + ' 组'
-                  : '   ·   ' + nodes.length + ' 文件 / ' + windows.length + ' 窗口 / ' + sources.length + ' 来源') +
+                '   ·   ' + ((data && data.flowNodes) || []).length + ' 节点 / ' + ((data && data.flows) || []).length + ' 关系 / ' + Object.keys((data && data.groups) || {}).length + ' 组' +
                 (scope ? '   ·   只看 ' + shownItems.length + ' 个' : ''),
             ),
         group
@@ -3497,32 +2677,27 @@ window.__ModuleLoader__.load({
                       }, label)),
               ),
               drop('viewMenu',
-                (current.viewMode === 'flow' ? '关系' : '全部') +
+                '全部' +
                   (current.scopeMode === 'ego' ? ' · 此节点关系' : current.scopeMode === 'chain' ? ' · 此节点链路' : '') + ' ▾',
-                '切换视图：关系 / 全部 / 此节点关系 / 此节点链路', 210,
+                '全部 / 此节点关系 / 此节点链路', 210,
                 [
-                  ['关系', 'flow', '画布：节点、关系、节点组'],
-                  ['全部', 'all', 'AI 读过 / 写过的文件与窗口'],
+                  ['全部', 'all', '整张图'],
                   ['此节点关系', 'ego', '选中节点 + 直接上游/下游'],
                   ['此节点链路', 'chain', '上游整条链路 + 一层下游'],
                 ].map(([label, mode, hint]) => {
-                  const on = mode === 'ego' || mode === 'chain' ? current.scopeMode === mode : current.viewMode === mode && current.scopeMode === 'none'
+                  const on = mode === 'all' ? current.scopeMode === 'none' : current.scopeMode === mode
                   return h('button', {
                     key: mode,
                     title: hint,
                     onClick: () => {
-                      if ((mode === 'ego' || mode === 'chain') && !current.selected) {
+                      if (mode !== 'all' && !current.selected) {
                         state.notice = '先选中一个节点，再用「' + label + '」'
                         state.viewMenu = false
                         notify()
                         return
                       }
-                      if (mode === 'flow' || mode === 'all') {
-                        state.viewMode = mode
-                        state.scopeMode = 'none'
-                      } else {
-                        state.scopeMode = mode
-                      }
+                      state.scopeMode = mode === 'all' ? 'none' : mode
+                      state.scopeDrags = {}
                       state.viewMenu = false
                       notify()
                     },
@@ -3543,6 +2718,7 @@ window.__ModuleLoader__.load({
                 }),
                 h('button', { key: 'b1', onClick: () => void addNode(), style: { ...menuItemStyle, textAlign: 'center', background: 'var(--dsw-alias-bg-layer-2)' } }, '＋ 添加节点'),
                 h('button', { key: 'b2', onClick: () => void addGroupNode(), style: { ...menuItemStyle, textAlign: 'center' } }, '＋ 添加节点组'),
+                h('button', { key: 'b6', onClick: () => void applyPreset(), style: { ...menuItemStyle, textAlign: 'center' } }, '添加工作流预设'),
                 h('button', { key: 'b3', onClick: () => { state.moreMenu = false; void duplicateSelected() }, style: { ...menuItemStyle, textAlign: 'center' } }, '再放一个同名节点'),
                 h('div', { key: 'sep', style: { height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0' } }),
                 h('button', {
@@ -3629,7 +2805,6 @@ window.__ModuleLoader__.load({
         : null
 
       const flowEmpty = flowModel && flowModel.items.length === 0
-      const allEmpty = !flowModel && nodes.length === 0 && windows.length === 0
 
       return h('div',
         {
@@ -3741,7 +2916,7 @@ window.__ModuleLoader__.load({
                       picked: current.picked || [],
                       // 只看局部（此节点关系/链路）时，点空白、拖画布都不清选中，否则模式立刻被取消
                       keepSelection: current.scopeMode !== 'none',
-                      viewKey: (data && data.active ? data.active.graphFile : '') + '|' + current.viewMode + '|' + groupStack.join('>'),
+                      viewKey: (data && data.active ? data.active.graphFile : '') + '|' + groupStack.join('>'),
                       onSelect: (id) => {
                         state.selected = id
                         state.picked = []
@@ -3764,9 +2939,16 @@ window.__ModuleLoader__.load({
                               }
                             }
                           })
-                        } else {
-                          void moveNodes(entries)
+                          return
                         }
+                        // 筛选模式（此节点关系/链路）下拖动只挪显示，不改进文件位置，
+                        // 否则会把自动排好的链路坐标写进「全部」的布局里。
+                        if (current.scopeMode !== 'none') {
+                          state.scopeDrags = { ...(state.scopeDrags || {}), ...entries }
+                          notify()
+                          return
+                        }
+                        void moveNodes(entries)
                       },
                       onConnect: (fromId, fromPort, toId, toPort) => {
                         if (group) {
@@ -3801,47 +2983,11 @@ window.__ModuleLoader__.load({
                       onPortContext: (node, side, index, x, y) => openPortMenu(node, side, index, x, y),
                       onViewport: (center) => { state.viewport = center },
                     }))
-              : (allEmpty
-                  ? h('div',
-                      { style: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: 'var(--dsw-alias-label-secondary)', fontSize: 12 } },
-                      h('div', { style: { fontSize: 13, color: 'var(--dsw-alias-label-primary)' } }, '还没有记录'),
-                      h('div', null, '插件只记 AI 读过 / 写过的文件；项目里已有的文件要扫一次才会进来。'),
-                      h('button',
-                        {
-                          onClick: () => void scanProject(),
-                          style: { marginTop: 4, height: 30, padding: '0 14px', borderRadius: 8, border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: '#fff', fontSize: 12, cursor: 'pointer' },
-                        },
-                        current.scanning ? '扫描中…' : '扫描项目现有文件',
-                      ),
-                    )
-                  : h(GraphCanvas, {
-                      items: shownItems,
-                      edges: shownEdges,
-                      showEvidence: current.showFileRef,
-                      viewKey: data && data.active ? data.active.graphFile : '',
-                      modeKey: (data && data.active ? data.active.graphFile : '') + '|' + current.viewMode + '|' + current.scopeMode,
-                      selected: current.selected,
-                      overrides: scope ? {} : current.nodePos,
-                      onCut: (list) => void cutEdges(list),
-                      onRename: () => {
-                        state.notice = '这一层是 AI 的读写记录；要改关系请切到「关系」画布'
-                        notify()
-                      },
-                      onViewport: (center) => { state.viewport = center },
-                      onNodeContext: () => {},
-                      onNodesMoved: (entries, asDelta) => void moveNodes(entries, asDelta),
-                      onNodeDragStart: (ids) => { state.draggingIds = ids },
-                      onSelect: (id) => {
-                        state.ctxMenu = null
-                        state.selected = id
-                        state.editing = false
-                        notify()
-                      },
-                    })),
+              : null,
             h(Details, {
                   item: selectedItem,
-                  items: flowModel ? flowModel.items : finalItems,
-                  edges: flowModel ? flowModel.edges : scopedEdges,
+                  items: flowModel ? flowModel.items : [],
+                  edges: flowModel ? flowModel.edges : [],
                   note: !selectedItem
                     ? ''
                     : selectedGroupDef
@@ -3868,20 +3014,11 @@ window.__ModuleLoader__.load({
                     }
                     void saveNote(label, text)
                   },
-                  simple: !!flowModel,
                   onOpenGroup: (canvasId) => openGroupNode(canvasId),
-                  showEvidence: current.showFileRef,
-                  mode: flowModel ? (current.scopeMode === 'none' ? 'all' : current.scopeMode) : current.viewMode,
+                  mode: current.scopeMode === 'none' ? 'all' : current.scopeMode,
                   onMode: (value) => {
-                    if (flowModel) {
-                      // 关系画布上这三个是"筛这张图"，不是换视图
-                      state.scopeMode = value === 'all' ? 'none' : value
-                    } else if (value === 'all' || value === 'flow') {
-                      state.viewMode = value
-                      state.scopeMode = 'none'
-                    } else {
-                      state.scopeMode = value
-                    }
+                    state.scopeMode = value === 'all' ? 'none' : value
+                    state.scopeDrags = {}
                     notify()
                   },
                   onSelect: (id) => {

@@ -51,7 +51,11 @@ const fixture = {
   projects: [],
 }
 
-const fetchStub = () => Promise.resolve({ json: () => Promise.resolve(fixture) })
+const posts = []
+const fetchStub = (url, init) => {
+  if (init && init.method === 'POST') posts.push({ url, init })
+  return Promise.resolve({ json: () => Promise.resolve(fixture) })
+}
 window.fetch = fetchStub
 global.fetch = fetchStub
 window.__FIXTURE__ = fixture
@@ -107,6 +111,19 @@ const posOf = (label) => {
   const nums = tr ? (tr.match(/-?\d+(\.\d+)?/g) || []).map(Number) : null
   return nums ? { x: nums[0], y: nums[1] } : null
 }
+
+// 筛选模式下拖节点：只挪显示，不写文件位置（否则会污染「全部」的布局）
+const beforeDrag = posOf('B')
+const bNode = [...document.querySelectorAll('text')].find((el) => el.textContent === 'B').closest('g')
+posts.length = 0
+act(() => { bNode.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientX: 340, clientY: 90 })) })
+act(() => { window.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 400, clientY: 160 })) })
+act(() => { window.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 400, clientY: 160 })) })
+const afterDrag = posOf('B')
+check('筛选模式下拖节点只挪显示', !!beforeDrag && !!afterDrag && (afterDrag.x !== beforeDrag.x || afterDrag.y !== beforeDrag.y), JSON.stringify({ beforeDrag, afterDrag }))
+check('筛选模式下拖节点不写盘', posts.filter((p) => p.url.includes('/filegraph/drag')).length === 0, JSON.stringify(posts.map((p) => p.url)))
+
+// 点「全部」回到原布局（临时拖动不落到文件位置）
 if (btn('此节点链路')) act(() => { btn('此节点链路').dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
 const pa = posOf('A'); const pb = posOf('B'); const pc = posOf('C'); const pd = posOf('D')
 check('链路横向排：D 在 A 左边、A 在 B 左边、B 在 C 左边',

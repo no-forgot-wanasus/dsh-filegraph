@@ -317,6 +317,29 @@ const undoFile = fs.existsSync(undoPath) ? JSON.parse(fs.readFileSync(undoPath, 
 assert('回退栈落盘了', Array.isArray(undoFile) && undoFile.length > 0, undoPath)
 assert('超出 10 步的旧快照不保存', Array.isArray(undoFile) && undoFile.length <= 10, undoFile ? String(undoFile.length) : 'no file')
 
+// 工作流预设：一键画模板（主干一条线 + 侧枝）
+await step('reset before preset', '/filegraph/reset', {})
+const presetList = await step('preset list', '/filegraph/preset', { action: 'list' })
+assert('能列出预设', presetList.json && Array.isArray(presetList.json.presets) && presetList.json.presets.length > 0, JSON.stringify(presetList.json))
+const applied = await step('preset apply', '/filegraph/preset', { action: 'apply' })
+assert('预设返回的节点/边数是数字（不和 payload 的 nodes/edges 撞名）',
+  applied.json && applied.json.presetNodes === 8 && applied.json.presetEdges === 7,
+  JSON.stringify({ presetNodes: applied.json && applied.json.presetNodes, presetEdges: applied.json && applied.json.presetEdges }))
+d = await data()
+const mainNames = ['需求', '设计', '制作', '检查', '交付']
+const mainIds = mainNames.map((name) => ((d.flowNodes || []).find((n) => n.name === name) || {}).id)
+assert('主干五个节点都在', mainIds.every(Boolean), JSON.stringify(mainIds))
+const mainYs = new Set(mainIds.map((id) => d.flowPositions[id].y))
+const mainXs = mainIds.map((id) => d.flowPositions[id].x)
+assert('主干排成一条横线（y 相同、x 递增）', mainYs.size === 1 && mainXs.every((x, i) => i === 0 || x > mainXs[i - 1]), JSON.stringify(mainXs))
+const chainOk = mainIds.slice(1).map((id, i) => (d.flows || []).some((f) => f.fromId === mainIds[i] && f.toId === id))
+assert('主干按顺序连成线', chainOk.every(Boolean), JSON.stringify(chainOk))
+const sideNames = ['参考素材', 'AI 生成', '修订']
+const sideIds = sideNames.map((name) => ((d.flowNodes || []).find((n) => n.name === name) || {}).id)
+assert('侧枝挂在主干下面（y 更低）', sideIds.every((id) => id && d.flowPositions[id].y > d.flowPositions[mainIds[0]].y), JSON.stringify(sideIds.map((id) => id && d.flowPositions[id])))
+assert('侧枝各有一条线进来', sideIds.every((id) => (d.flows || []).some((f) => f.toId === id)), '')
+assert('预设里没有回环', (d.flows || []).every((f) => f.fromId !== f.toId), '')
+
 await step('reset', '/filegraph/reset', {})
 d = await data()
 assert('清空后无画布', (d.flowNodes || []).length === 0 && (d.flows || []).length === 0 && Object.keys(d.groups || {}).length === 0, '')

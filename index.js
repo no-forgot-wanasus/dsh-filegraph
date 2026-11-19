@@ -2195,6 +2195,80 @@ export function apply(ctx, config = {}) {
     sendJson(res, 200, { ok: true, undone: true, left: stack.length, ...(await payloadFor(current, rows[0].root)) })
   })
 
+  /* 工作流预设：presets/*.json（点一下画一套模板；AI 也可直接读这些文件） */
+  const PRESET_DIR = new URL('./presets/', import.meta.url)
+
+  async function loadPresets() {
+    const out = []
+    try {
+      const names = (await fsp.readdir(PRESET_DIR)).filter((name) => name.endsWith('.json')).sort()
+      for (const name of names) {
+        try {
+          out.push(JSON.parse(await fsp.readFile(new URL(name, PRESET_DIR), 'utf8')))
+        } catch {}
+      }
+    } catch {}
+    return out
+  }
+
+  postRoute('/filegraph/preset', async (req, res, body) => {
+    const presets = await loadPresets()
+    if (String(body.action || 'list') === 'list') {
+      sendJson(res, 200, { ok: true, presets: presets.map((item) => ({ id: item.id, name: item.name, note: item.note || '' })) })
+      return
+    }
+    const wanted = String(body.id || '')
+    const preset = wanted ? presets.find((item) => item.id === wanted) : presets[0]
+    if (!preset) return fail(res, '没有预设文件（presets/*.json）')
+    const current = await ensureState()
+    const active = projectRows(current)[0]
+    if (!active) return fail(res, 'no active project')
+    const entry = await graphFor(active.graphFile, active.root)
+    await snapshotGraph(entry.graph, active.graphFile)
+    const graph = entry.graph
+    ensureCanvas(graph)
+
+    const idByName = new Map()
+    const mainLine = Array.isArray(preset.main) ? preset.main : []
+    let nodes = 0
+    let edges = 0
+    for (let i = 0; i < mainLine.length; i += 1) {
+      const name = String((mainLine[i] && mainLine[i].name) || '').trim()
+      if (!name) continue
+      const id = nextNodeId(graph)
+      graph.flowNodes.push({ id, name, kind: 'node' })
+      graph.flowPositions[id] = { x: 80 + i * 240, y: 140 }
+      if (!idByName.has(name)) idByName.set(name, id)
+      nodes += 1
+    }
+    for (let i = 1; i < mainLine.length; i += 1) {
+      const fromId = idByName.get(String((mainLine[i - 1] && mainLine[i - 1].name) || '').trim())
+      const toId = idByName.get(String((mainLine[i] && mainLine[i].name) || '').trim())
+      if (!fromId || !toId) continue
+      graph.flows.push({ id: nextEdgeId(graph), fromId, toId, fromPort: 0, toPort: 0, verb: String((mainLine[i] && mainLine[i].verb) || '') })
+      edges += 1
+    }
+    const side = Array.isArray(preset.side) ? preset.side : []
+    for (let i = 0; i < side.length; i += 1) {
+      const name = String((side[i] && side[i].name) || '').trim()
+      const fromId = idByName.get(String((side[i] && side[i].from) || '').trim())
+      if (!name || !fromId) continue
+      const id = nextNodeId(graph)
+      graph.flowNodes.push({ id, name, kind: 'node' })
+      const base = graph.flowPositions[fromId] || { x: 80, y: 140 }
+      graph.flowPositions[id] = { x: base.x + 40, y: 320 + i * 96 }
+      if (!idByName.has(name)) idByName.set(name, id)
+      graph.flows.push({ id: nextEdgeId(graph), fromId, toId: id, fromPort: 0, toPort: 0, verb: String((side[i] && side[i].verb) || '') })
+      edges += 1
+      nodes += 1
+    }
+    normalizeAllGroupPorts(graph)
+    graph.updatedAt = Date.now()
+    await writeCanvas(graph, current, active)
+    await flushGraph(entry, active.graphFile)
+    sendJson(res, 200, { ok: true, presetName: preset.name || '工作流预设', presetNodes: nodes, presetEdges: edges, ...(await payloadFor(current, active.root)) })
+  })
+
   // 剪刀：按 id（或两端）删掉关系
   postRoute('/filegraph/remove-edge', async (req, res, body) => {
     const wanted = Array.isArray(body.edges) ? body.edges : []

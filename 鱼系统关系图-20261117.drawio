@@ -2,244 +2,62 @@
 <mxfile host="filegraph"><diagram id="fg" name="关系"><mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root>
 <mxCell id="0"/>
 <mxCell id="1" parent="0"/>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  <mxCell id="n1" value="醒（节律）" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-    <mxGeometry x="0" y="150" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n2" value="等心跳叫醒" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-    <mxGeometry x="220" y="200" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n3" value="私信两分钟一查" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-    <mxGeometry x="440" y="150" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n4" value="选 play 线" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-    <mxGeometry x="440" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n5" value="play 线" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-    <mxGeometry x="660" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n6" value="读评论 / 弹幕" style="fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-    <mxGeometry x="0" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n7" value="看屏幕画面" style="fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-    <mxGeometry x="220" y="300" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n8" value="读房间对话" style="fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-    <mxGeometry x="440" y="350" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n9" value="读临时记忆" style="fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-    <mxGeometry x="0" y="350" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n10" value="思考窗口" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="880" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n11" value="说话窗口" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1100" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n12" value="过词表删句" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1320" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n13" value="过礼仪闸" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1540" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n14" value="是否通过" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1760" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n15" value="在悬浮窗说话" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1980" y="200" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n16" value="发出私信" style="fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-    <mxGeometry x="1980" y="300" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n17" value="写临时记忆文件" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2200" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n18" value="写长期记忆" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2420" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n19" value="归档进 digest" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="0" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n20" value="记判重表" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="100" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n21" value="写海马体流" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="200" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n22" value="人物索引" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="300" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n23" value="知识库" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="400" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n24" value="整理日报" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2640" y="500" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="n25" value="写日报文件" style="fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-    <mxGeometry x="2860" y="250" width="130" height="60" as="geometry" />
-  </mxCell>
-  <mxCell id="e1" value="等心跳" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n1" target="n2">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e2" value="叫醒" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n2" target="n3">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e3" value="叫醒" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n2" target="n4">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e4" value="叫醒" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n2" target="n8">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e5" value="选定线" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n4" target="n5">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e6" value="送来私信" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n3" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e7" value="取数评论" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n6" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e8" value="抓图屏幕" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n7" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e9" value="取数房间" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n8" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e10" value="注入记忆" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n9" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e11" value="注入 play 线" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n5" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e12" value="触发看屏幕" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n9" target="n7">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e13" value="触发读房间" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n9" target="n8">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e14" value="起句说话" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n10" target="n11">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e15" value="先过滤词表" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n11" target="n12">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e16" value="再过礼仪" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n12" target="n13">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e17" value="判定" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n13" target="n14">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e18" value="否：退回重想" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n14" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e19" value="是：说悬浮窗" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n14" target="n15">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e20" value="是：发私信" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n14" target="n16">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e21" value="记悬浮窗" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n15" target="n17">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e22" value="记私信" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n16" target="n17">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e23" value="写临时记忆" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n10" target="n17">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e24" value="写临时记忆" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n5" target="n17">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e25" value="结束时落长期记忆" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n17" target="n18">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e26" value="归档 digest" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n19">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e27" value="记判重表" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n20">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e28" value="写海马体流" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n21">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e29" value="更新人物档案" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n22">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e30" value="沉淀知识条目" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n23">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e31" value="汇入" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n18" target="n24">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e32" value="落成" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n24" target="n25">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
-  <mxCell id="e33" value="次日注入日报" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n25" target="n10">
-    <mxGeometry relative="1" as="geometry" />
-  </mxCell>
+<mxCell id="n1" value="醒（节律）" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="0" y="150" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n2" value="等心跳叫醒" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="220" y="200" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n3" value="私信两分钟一查" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="440" y="150" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n4" value="选 play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="440" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n5" value="play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="660" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n6" value="读评论 / 弹幕" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="0" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n7" value="看屏幕画面" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="220" y="300" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n8" value="读房间对话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="440" y="350" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n9" value="读临时记忆" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="0" y="350" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n10" value="思考窗口" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="880" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n11" value="说话窗口" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1100" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n12" value="过词表删句" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1320" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n13" value="过礼仪闸" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1540" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n14" value="是否通过" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1760" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n15" value="在悬浮窗说话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1980" y="200" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n16" value="发出私信" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1980" y="300" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n17" value="写临时记忆文件" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2200" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n18" value="写长期记忆" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2420" y="250" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n19" value="归档进 digest" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="0" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n20" value="记判重表" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="100" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n21" value="写海马体流" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="200" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n22" value="人物索引" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="300" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n23" value="知识库" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="400" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n24" value="整理日报" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2640" y="500" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n25" value="写日报文件" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="2868" y="242" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="e1" value="等心跳" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e2" value="叫醒" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n2" target="n3"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e3" value="叫醒" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n2" target="n4"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e4" value="叫醒" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n2" target="n8"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e5" value="选定线" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n4" target="n5"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e6" value="送来私信" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n3" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e7" value="取数评论" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n6" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e8" value="抓图屏幕" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n7" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e9" value="取数房间" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n8" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e10" value="注入记忆" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n9" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e11" value="注入 play 线" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n5" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e12" value="触发看屏幕" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n9" target="n7"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e13" value="触发读房间" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n9" target="n8"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e14" value="起句说话" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n10" target="n11"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e15" value="先过滤词表" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n11" target="n12"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e16" value="再过礼仪" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n12" target="n13"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e17" value="判定" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n13" target="n14"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e18" value="否：退回重想" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n14" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e19" value="是：说悬浮窗" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n14" target="n15"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e20" value="是：发私信" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n14" target="n16"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e21" value="记悬浮窗" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n15" target="n17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e22" value="记私信" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n16" target="n17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e23" value="写临时记忆" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n10" target="n17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e24" value="写临时记忆" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n5" target="n17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e25" value="结束时落长期记忆" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n17" target="n18"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e26" value="归档 digest" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n19"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e27" value="记判重表" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n20"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e28" value="写海马体流" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n21"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e29" value="更新人物档案" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n22"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e30" value="沉淀知识条目" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n23"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e31" value="汇入" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n18" target="n24"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e32" value="落成" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n24" target="n25"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e33" value="次日注入日报" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n25" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
 </root></mxGraphModel></diagram></mxfile>

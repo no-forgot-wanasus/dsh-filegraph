@@ -115,16 +115,13 @@ const check = (html, label, must) => {
 }
 
 const base = render(null, '关系画布')
-check(base, '关系画布', ['关系', '文件 ▾', '关系 ▾', '⋯', '说明', '刷新', '关闭', '启动脚本', 'main', '节点组 1', '激活'])
+check(base, '关系画布', ['全部 ▾', '文件 ▾', '此节点关系', '此节点链路', '⋯', '说明', '刷新', '关闭', '启动脚本', 'main', '节点组 1', '激活'])
 
 const inGroup = render((s) => s.replace('      groupStack: [],', "      groupStack: ['" + groupId + "'],"), '节点组内部')
 check(inGroup, '节点组内部', ['节点组 1', '组输入', '组输出', '分布点', '密度', '网格', '返回', '＋ 节点'])
 
 const sel = render((s) => s.replace('      selected: null,', "      selected: 'f:n2',"), '选中节点（详情栏）')
-check(sel, '选中节点', ['这个节点是干什么用的', '入口文件'])
-
-const all = render((s) => s.replace("      viewMode: 'flow',", "      viewMode: 'all',"), '全部视图')
-check(all, '全部视图', ['全部 ▾', 'a.js', 'b.js'])
+check(sel, '选中节点', ['节点功能描述', '（这个节点做什么用）', '输入（从哪来）', '输出（到哪去）', '入口文件'])
 
 const menus = render((s) =>
   s.replace('      fileMenu: false,', '      fileMenu: true,')

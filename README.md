@@ -66,12 +66,20 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | 右键空白 | 添加节点 / 添加节点组；新对象落在**屏幕中心**，压住已有节点时自动往外找空位 |
 | 左上角路径 | 回到上一层节点组 |
 | 文件 ▾ | 新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档 |
-| 关系 ▾ | 关系 / 全部 / 此节点关系 / 此节点链路 |
+| 全部 ▾ | 全部 / 此节点关系 / 此节点链路 |
 | ⋯ | 加节点 / 加节点组 / 再放同名 / 设置 / 清空这张图 |
 | 组端口名字 | 默认名（输入 / 输入 2）自动补成外面那条线的节点名：入口=上一节点名，出口=默认名；同一根输入加出来的端口与原端口同名；端口始终 n+1（n 条已接 + 1 个空口） |
 | 拖动后的位置 | 只存一份绝对坐标：拖完先在内存里，Ctrl+S、退出、每 3 分钟自动写进 `.drawio`；Ctrl+Z 能退回上一步 |
 | 节点说明（备注） | 跟节点一起写进 `.drawio`（drawio 的「编辑数据」= `UserObject` 的 `note` 属性），换文件或被 drawio 打开都不会丢 |
 | 表头「说明」 | 弹出快捷键与对应操作一览（只有这两列） |
+
+## 工作流预设
+
+`presets/*.json`：一条主干线 + 若干侧枝的模板。
+
+- 用户入口：「⋯ → 添加工作流预设」，点一下把第一个预设画进当前图（主干横排、侧枝挂下面）。
+- 给 AI 读：直接看 `presets/*.json` 与 `presets/README.md`；写图约定是**总项目一条主干线，AI 制作/后期添加挂侧枝，尽量不用循环，要回环就用同名新节点**。
+- 加预设不用改代码：往 `presets/` 放一个 `{id,name,note,main:[{name,verb}],side:[{name,from,verb}]}` 的 json 即可。
 
 ## 文件与数据
 
@@ -100,7 +108,9 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | `/filegraph/remove-node` | 删节点（连带连线）`{id}` |
 | `/filegraph/note` | 写备注 `{name,text}`（按名字） |
 | `/filegraph/duplicate` | 再放一个同名节点 `{id}` |
-| `/filegraph/position` / `/filegraph/drag` | 画布坐标 / 手拖矢量 |
+| `/filegraph/position` / `/filegraph/drag` | 画布坐标 / 手拖后的绝对坐标 |
+| `/filegraph/preset` | 工作流预设：`list` 列预设、`apply`（可带 `id`）把模板画进当前图 |
+| `/filegraph/undo` | 回退一步（整图快照栈） |
 | `/filegraph/new` `/filegraph/open` `/filegraph/export` | 文件菜单 |
 | `/filegraph/import` / `/filegraph/export-md` | 导入 `.drawio` / 导出关系文档 |
 | `/filegraph/scan` `/filegraph/prune` `/filegraph/reset` | AI 记录层：扫描 / 清理孤点 / 清空 |
@@ -111,7 +121,7 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | 文件 | 负责 |
 | --- | --- |
 | `index.js` | 宿主：AI 记录、`.graph.json` 读写、`.drawio` 解析/生成、全部路由 |
-| `client.js` | 面板：`GraphCanvas`（全部视图）、`FlowCanvas`（关系画布，含节点组）、`Details`、文件菜单 |
+| `client.js` | 面板：`FlowCanvas`（关系画布，含节点组）、`Details`（节点功能描述 + 输入/输出）、文件菜单 |
 | `cordis.patch.yml` | bundle 入口（一条 Host 行） |
 | `locale/*.json` | 面板标题与描述 |
 | `icon.svg` | 侧栏图标 |

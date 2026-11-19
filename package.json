@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-filegraph",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "description": "关系插件：节点、关系、可打开的节点组，画在一张可保存的文件里。",
@@ -16,7 +16,9 @@
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "presets/*.json",
+    "presets/README.md"
   ],
   "dsh": {
     "bundle": {
