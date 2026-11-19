@@ -1367,7 +1367,7 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    function FlowCanvas({ nodes, edges, positions, selected, picked, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onCut, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
+    function FlowCanvas({ nodes, edges, positions, selected, picked, keepSelection, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onCut, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
       const svgRef = useRef(null)
       const [view, setView] = useState({ k: 1, dx: 0, dy: 0 })
       const viewRef = useRef(view)
@@ -1695,7 +1695,7 @@ window.__ModuleLoader__.load({
                 }
                 return
               }
-              if (onSelect) onSelect(null)
+              if (!keepSelection && onSelect) onSelect(null)
               if (onPick) onPick([])
               movedRef.current = false
               dragRef.current = { mode: 'pan', sx: event.clientX, sy: event.clientY, dx: view.dx, dy: view.dy }
@@ -1761,7 +1761,7 @@ window.__ModuleLoader__.load({
                       }
                       if (svgRef.current) svgRef.current.style.cursor = 'crosshair'
                     } else {
-                      if (onSelect) onSelect(null)
+                      if (!keepSelection && onSelect) onSelect(null)
                       if (onPick) onPick([])
                     }
                   },
@@ -2059,6 +2059,29 @@ window.__ModuleLoader__.load({
             style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', gap: 8, },
           },
           noteBox,
+          h('div',
+            { style: { display: 'flex', gap: 4 } },
+            [
+              ['全部', 'all'],
+              ['此节点关系', 'ego'],
+              ['此节点链路', 'chain'],
+            ].map(([label, value]) =>
+              h('button',
+                {
+                  key: value,
+                  onClick: () => onMode && onMode(value),
+                  title:
+                    value === 'ego'
+                      ? '只显示这个节点 + 直接上游 + 直接下游，横向排'
+                      : value === 'chain'
+                        ? '上游整条链路 + 一层下游'
+                        : '显示整张图',
+                  style: { flex: 1, height: 24, padding: '0 6px', borderRadius: 6, border: '1px solid ' + (mode === value ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)'), background: mode === value ? 'var(--dsw-alias-brand-primary)' : 'transparent', color: mode === value ? '#fff' : 'var(--dsw-alias-label-secondary)', fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap' },
+                },
+                label,
+              ),
+            ),
+          ),
           h('div', { style: { fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, item.label),
           item.kind === 'group'
             ? h('button', {
@@ -3164,6 +3187,34 @@ window.__ModuleLoader__.load({
         [baseEdges, scope],
       )
 
+      /**
+       * 只看局部时按"制造链路"横向排：上游全在左（深度越深越左），选中节点居中，下游一列在右。
+       * 只影响显示，不动文件里存的位置。
+       */
+      const layeredPositions = useMemo(() => {
+        if (!scope || !flowModel) return null
+        const columns = new Map()
+        for (const item of flowModel.items) {
+          if (!scope.keep.has(item.id)) continue
+          const level = scope.levels.get(item.id) ?? 0
+          if (!columns.has(level)) columns.set(level, [])
+          columns.get(level).push(item)
+        }
+        const order = [...columns.keys()].sort((a, b) => a - b)
+        const positions = {}
+        order.forEach((level, columnIndex) => {
+          const list = columns.get(level).slice().sort((a, b) => {
+            const pa = flowModel.positions[a.id] || { x: 0, y: 0 }
+            const pb = flowModel.positions[b.id] || { x: 0, y: 0 }
+            return pa.y - pb.y || pa.x - pb.x
+          })
+          list.forEach((item, rowIndex) => {
+            positions[item.id] = { x: 60 + columnIndex * 260, y: 60 + rowIndex * 96 }
+          })
+        })
+        return positions
+      }, [scope, flowModel])
+
       const groupStack = current.groupStack || []
       const groupPath = groupStack.map((id) => (((data && data.groups) || {})[id] || {}).name || '节点组')
 
@@ -3685,9 +3736,11 @@ window.__ModuleLoader__.load({
                   : h(FlowCanvas, {
                       nodes: shownItems,
                       edges: shownEdges,
-                      positions: flowModel.positions,
+                      positions: layeredPositions || flowModel.positions,
                       selected: current.selected,
                       picked: current.picked || [],
+                      // 只看局部（此节点关系/链路）时，点空白、拖画布都不清选中，否则模式立刻被取消
+                      keepSelection: current.scopeMode !== 'none',
                       viewKey: (data && data.active ? data.active.graphFile : '') + '|' + current.viewMode + '|' + groupStack.join('>'),
                       onSelect: (id) => {
                         state.selected = id
@@ -3818,9 +3871,17 @@ window.__ModuleLoader__.load({
                   simple: !!flowModel,
                   onOpenGroup: (canvasId) => openGroupNode(canvasId),
                   showEvidence: current.showFileRef,
-                  mode: current.viewMode,
+                  mode: flowModel ? (current.scopeMode === 'none' ? 'all' : current.scopeMode) : current.viewMode,
                   onMode: (value) => {
-                    state.viewMode = value
+                    if (flowModel) {
+                      // 关系画布上这三个是"筛这张图"，不是换视图
+                      state.scopeMode = value === 'all' ? 'none' : value
+                    } else if (value === 'all' || value === 'flow') {
+                      state.viewMode = value
+                      state.scopeMode = 'none'
+                    } else {
+                      state.scopeMode = value
+                    }
                     notify()
                   },
                   onSelect: (id) => {
