@@ -61,8 +61,6 @@ window.__ModuleLoader__.load({
       ['左键拖端口到节点框上', '连一条关系'],
       ['滚轮', '缩放（不设上限）'],
       ['文件 ▾', '新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档'],
-      ['全部 ▾', '全部 / 此节点关系 / 此节点链路'],
-      ['⋯', '加节点 / 加节点组 / 工作流预设 / 设置 / 清空这张图'],
       ['左上角路径', '回到上一层节点组'],
     ]
 
@@ -3007,66 +3005,32 @@ window.__ModuleLoader__.load({
                           notify()
                         },
                         style: menuItemStyle,
-                      }, label)),
+                      }, label))
+                      .concat([
+                        h('div', { key: 'sep2', style: { height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0' } }),
+                        h('button', {
+                          key: 'preset',
+                          onClick: () => { state.fileMenu = false; void applyPreset() },
+                          style: menuItemStyle,
+                        }, '添加工作流预设'),
+                        h('button', {
+                          key: 'settings',
+                          onClick: () => {
+                            state.fileMenu = false
+                            state.draft = (data && data.settings && data.settings.graphFile) || ''
+                            state.undoDraft = (data && data.settings && data.settings.undoDepth) || 30
+                            state.showSettings = true
+                            notify()
+                          },
+                          style: menuItemStyle,
+                        }, '设置…'),
+                        h('button', {
+                          key: 'reset',
+                          onClick: () => { state.fileMenu = false; void resetGraph() },
+                          style: { ...menuItemStyle, color: 'var(--dsw-alias-state-error-primary)' },
+                        }, '清空这张图'),
+                      ]),
               ),
-              drop('viewMenu',
-                '全部' +
-                  (current.scopeMode === 'ego' ? ' · 此节点关系' : current.scopeMode === 'chain' ? ' · 此节点链路' : '') + ' ▾',
-                '全部 / 此节点关系 / 此节点链路', 210,
-                [
-                  ['全部', 'all', '整张图'],
-                  ['此节点关系', 'ego', '选中节点 + 直接上游/下游'],
-                  ['此节点链路', 'chain', '上游整条链路 + 一层下游'],
-                ].map(([label, mode, hint]) => {
-                  const on = mode === 'all' ? current.scopeMode === 'none' : current.scopeMode === mode
-                  return h('button', {
-                    key: mode,
-                    title: hint,
-                    onClick: () => {
-                      if (mode !== 'all' && !current.selected) {
-                        state.notice = '先选中一个节点，再用「' + label + '」'
-                        state.viewMenu = false
-                        notify()
-                        return
-                      }
-                      state.scopeMode = mode === 'all' ? 'none' : mode
-                      state.scopeDrags = {}
-                      state.viewMenu = false
-                      notify()
-                    },
-                    style: { ...menuItemStyle, color: on ? WINDOW_COLOR : undefined },
-                  }, (on ? '✓ ' : '   ') + label)
-                }),
-              ),
-              drop('moreMenu', '⋯', '更多操作', 280, [
-                h('div', { key: 'l1', style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, '添加节点'),
-                h('input', {
-                  key: 'i1',
-                  value: current.newNode || '',
-                  placeholder: '节点名',
-                  spellCheck: false,
-                  onChange: (event) => { state.newNode = event.target.value; notify() },
-                  onKeyDown: (event) => { if (event.key === 'Enter') void addNode() },
-                  style: linkInputStyle,
-                }),
-                h('button', { key: 'b1', onClick: () => void addNode(), style: { ...menuItemStyle, textAlign: 'center', background: 'var(--dsw-alias-bg-layer-2)' } }, '＋ 添加节点'),
-                h('button', { key: 'b2', onClick: () => void addGroupNode(), style: { ...menuItemStyle, textAlign: 'center' } }, '＋ 添加节点组'),
-                h('button', { key: 'b6', onClick: () => void applyPreset(), style: { ...menuItemStyle, textAlign: 'center' } }, '添加工作流预设'),
-                h('button', { key: 'b3', onClick: () => { state.moreMenu = false; void duplicateSelected() }, style: { ...menuItemStyle, textAlign: 'center' } }, '再放一个同名节点'),
-                h('div', { key: 'sep', style: { height: 1, background: 'var(--dsw-alias-border-l1)', margin: '4px 0' } }),
-                h('button', {
-                  key: 'b5',
-                  onClick: () => {
-                    state.moreMenu = false
-                    state.draft = (data && data.settings && data.settings.graphFile) || ''
-                    state.undoDraft = (data && data.settings && data.settings.undoDepth) || 30
-                    state.showSettings = true
-                    notify()
-                  },
-                  style: { ...menuItemStyle, textAlign: 'center' },
-                }, '设置…'),
-                h('button', { key: 'b4', onClick: () => { state.moreMenu = false; void resetGraph() }, style: { ...menuItemStyle, color: 'var(--dsw-alias-state-error-primary)' } }, '清空这张图'),
-              ]),
             ],
         h('button',
           {

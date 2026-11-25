@@ -10,7 +10,7 @@
 ## 只有一张画布
 
 面板就是**关系画布**（当前 `.drawio` 是唯一真源）：人/模型标的节点、关系、节点组。
-顶部的「全部 ▾」不是另一张图，是这张图的三种筛法：全部 / 此节点关系 / 此节点链路。
+
 
 `.graph.json` 里另有一层只读的 AI 记录（`write`/`edit` 记「窗口写出文件」，`read`/`read_image` 记「窗口读入文件」，
 `mcp__*` / `web_*` / `pwsh` / `bash` / `terminal_*` / `see_now` / `browser_*` 记「窗口从某来源取数」），
@@ -71,10 +71,8 @@
 | 右键 组输入 / 组输出 | 每个关系一个端口（同一端口挂了两条关系就再加一个；连线时也会自动加） |
 | 右键空白 | 添加节点 / 添加节点组；新对象落在**屏幕中心**，压住已有节点时自动往外找空位 |
 | 左上角路径 | 回到上一层节点组 |
-| 文件 ▾ | 新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档 |
+| 文件 ▾ | 新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档 / 添加工作流预设 / 设置… / 清空这张图 |
 | 工具条「复制文件地址」 | 把当前 `.drawio` 的**文件地址**复制到剪贴板（地址带空格时复制成 `@"..."`），直接粘到对话里 AI 就能读这个文件；还没有落到文件时只提示去另存为 |
-| 全部 ▾ | 全部 / 此节点关系 / 此节点链路 |
-| ⋯ | 加节点 / 加节点组 / 再放同名 / 设置 / 清空这张图 |
 | 组端口名字 | 默认名（输入 / 输入 2）自动补成外面那条线的节点名：入口=上一节点名，出口=默认名；同一根输入加出来的端口与原端口同名；端口始终 n+1（n 条已接 + 1 个空口） |
 | 拖动后的位置 | 只存一份绝对坐标：拖完先在内存里，Ctrl+S、退出、每 3 分钟自动写进 `.drawio`；Ctrl+Z 能退回上一步 |
 | 节点说明（备注） | 跟节点一起写进 `.drawio`（drawio 的「编辑数据」= `UserObject` 的 `note` 属性），换文件或被 drawio 打开都不会丢 |
@@ -84,7 +82,7 @@
 
 `presets/*.json`：一条主干线 + 若干侧枝的模板。
 
-- 用户入口：「⋯ → 添加工作流预设」，点一下把第一个预设画进当前图（主干横排、侧枝挂下面）。
+- 目前没有面板入口：预设由 /filegraph/preset 路由（pply）画进当前图，或由模型调用。
 - 给 AI 读：直接看 `presets/*.json` 与 `presets/README.md`；写图约定是**总项目一条主干线，AI 制作/后期添加挂侧枝，尽量不用循环，要回环就用同名新节点**。
 - 加预设不用改代码：往 `presets/` 放一个 `{id,name,note,main:[{name,verb}],side:[{name,from,verb}]}` 的 json 即可。
 
@@ -114,12 +112,37 @@
   画布上不显示，识图看不到；只看图会漏掉每个节点"做什么用"。
 - 同名节点共用一份说明（`nodeNotes[名字]`）：读说明按名字查，不是按 id。
 
+## 给 AI 的画图工具（`relation_draw`）
+
+模型不用再手写 XML：宿主注册了一个工具，直接调 `relation_draw` 就能往当前这张图上画。
+
+| op | 参数 | 说明 |
+| --- | --- | --- |
+| `addNode` | `name`、`note?`、`x?`/`y?`、`as?` | 起一个节点；`as` 是本次调用里的别名，后面 `addEdge` 可以直接引用 |
+| `addEdge` | `from`、`to`、`verb?`、`as?` | `from`/`to` 可以写节点 id、节点名，或本次的别名 |
+| `setNote` | `name`、`text` | 按名字写备注（全图同名节点共用） |
+| `renameNode` | `id`、`name` | 改一个节点实例的名字 |
+| `removeNode` / `removeEdge` | `id` | 删节点（连带连线）/ 删一条关系 |
+| `setVerb` | `id`、`verb` | 改线上方的动作词 |
+| `move` | `id`、`x`、`y` | 挪一个节点 |
+
+- **写盘前验线**：按关系画布真实的走线（节点 178×34，右缘中点 → 目标左缘中点、三次贝塞尔）检查「不同灰线不许相交」。
+  相交就**整次打回、一个字节都不写**，并报出是哪两条线。改完整套重发。
+- **不给坐标就自动摆位**：按层排（列距 250、行距 90）；给了 `x`/`y` 就用给的坐标。
+- **名字是数据载体**：同一范围的多个节点取同一个名字（备注共用），节点 id 各自不同；
+  回环就用同名新节点把线引开，别让一条线跨过别的线。
+- 写完会顺带把 `.graph.json` 同步到新结构（面板刷新后即见，也能 Ctrl+Z 退回）。
+
 ## 给 AI 写图的规矩
 
+- **优先用 `relation_draw`**：结构化 ops 比手写 XML 少出错，而且写盘前就会验线。
+  只有工具够不到的地方（节点组内部、整份迁移）才直接改 `.drawio`。
 - **不许改动已有结构**：已有节点的 id / 名字 / 连线 / 动作词 / 端口，一律原样保留；
   新东西只能是**新增**（新 id），不能为了排得好看去重排、重连、改名或删旧节点。
 - **可以像刀一样切开腾位置**：要往两个节点中间插东西时，把那一段之后的节点**整体**往下/往右平移
   （同一列/同一行的节点要一起动），腾出空位再放新节点；只移动坐标，不动关系。
+- **线不许交叉，回环用同名新节点**：画布的连线固定从节点右缘出、目标左缘进，所以"从右往左"的边会绕一个大弧、
+  横穿整张图。要回环就在回路那一端放一个**同名节点（新 id）**把线引开，别让一条线跨过其他线。
 - 写完 `.drawio` 刷新面板：宿主会发现文件变了，把改之前的图压进回退栈（Ctrl+Z 能退回），再接受新结构。
   想让这一刻以后还能对照 / 回滚，就点一次「保存快照」留成一份文件快照。
 
@@ -143,6 +166,7 @@
 | --- | --- |
 | `GET /filegraph/data` | 全量数据（含 `flowNodes` / `flows` / `flowPositions` / `drags` / `nodeNotes` / `groups`） |
 | `GET /filegraph/list` | 文件浏览器用的目录列表 |
+| `/filegraph/save` | 保存整份图（面板 Ctrl+S / 3 分钟自动保存都走它） |
 | `/filegraph/node` | 新建节点 `{name?,x?,y?,kind?}` |
 | `/filegraph/group` | 节点组：`create`（可带 `parent` 嵌套）/ `save`（整份内部数据）/ `rename` / `delete` |
 | `/filegraph/edge` | 加关系 `{fromId,toId,fromPort?,toPort?,verb?}` |
@@ -159,7 +183,7 @@
 | `/filegraph/new` `/filegraph/open` `/filegraph/export` | 文件菜单 |
 | `/filegraph/import` / `/filegraph/export-md` | 导入 `.drawio` / 导出关系文档 |
 | `/filegraph/scan` `/filegraph/prune` `/filegraph/reset` | AI 记录层：扫描 / 清理孤点 / 清空 |
-| `/filegraph/window` `/filegraph/settings` `/filegraph/flow` `/filegraph/undo` | 记录层杂项 |
+| `/filegraph/window` `/filegraph/settings` `/filegraph/flow` | 记录层杂项 |
 
 ## 文件地图
 
@@ -170,19 +194,33 @@
 | `cordis.patch.yml` | bundle 入口（一条 Host 行） |
 | `locale/*.json` | 面板标题与描述 |
 | `icon.svg` | 侧栏图标 |
-| `tests/smoke-host.mjs` | 全部路由实跑 + 断言（id/同名/节点组/长名/无框/版本号只增不减） |
-| `tests/smoke-client.mjs` | 用真 React SSR 渲面板（关系视图/组内/详情/全部/菜单/右键菜单/历史窗口） |
-| `tests/interaction-history.mjs` | 往期历史交互（点版本取图、眼睛开关、缓存、回到此版本） |
-| `tests/interaction-copypath.mjs` | 工具条「复制文件地址」：普通地址原样复制 / 带空格复制成 `@"..."` / 没有文件只提示 |
-| `tests/interaction-hooks.mjs` | 面板反复关/开不变 hook 数量（防 React #310：hook 不能写在 `if (!current.open) return null` 之后） |
-| `tests/smoke-live.mjs` | 拉正在跑的宿主的真实 `/filegraph/data` 渲一遍面板，确认线上数据不炸 |
+| `presets/*.json` | 工作流预设（主干 + 侧枝模板） |
+| `docs/preview.png` | 本 README 顶部的面板截图 |
 
 ## 测试
+
+`tests/` 下每个文件都是独立的 node 脚本，跑完打印断言结果，退出码非 0 即失败。
+
+| 脚本 | 覆盖 |
+| --- | --- |
+| `smoke-host.mjs` | 全部路由实跑 + 断言（id/同名/节点组/长名/无框/版本号只增不减） |
+| `smoke-client.mjs` | 用真 React SSR 渲面板（关系视图/组内/详情/全部/菜单/右键菜单/历史窗口） |
+| `smoke-live.mjs` | 拉正在跑的宿主的真实 `/filegraph/data` 渲一遍面板，确认线上数据不炸 |
+| `interaction-client.mjs` / `interaction-scope.mjs` | 客户端整体交互与筛选（全部 / 此节点关系 / 此节点链路） |
+| `interaction-history.mjs` | 往期历史交互（点版本取图、眼睛开关、缓存、回到此版本） |
+| `interaction-copypath.mjs` | 工具条「复制文件地址」：普通地址原样复制 / 带空格复制成 `@"..."` / 没有文件只提示 |
+| `interaction-hooks.mjs` | 面板反复关/开不变 hook 数量（防 React #310：hook 不能写在 `if (!current.open) return null` 之后） |
+| `interaction-drag.mjs` / `interaction-blankmenu.mjs` | 拖节点与空白处右键菜单 |
+| `interaction-filemenu.mjs` | 文件菜单（新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出） |
+| `interaction-cut.mjs` / `interaction-ports.mjs` / `interaction-port-prune.mjs` | 剪刀剪线、端口增删、空端口清理 |
+| `interaction-spread.mjs` | 同一端口被多条关系共用时摊到不同端口 |
+| `smoke-relation-tool.mjs` | `relation_draw`：注册与 output 声明、画图落盘（节点名/动作词/备注）、交叉整次打回且一个字节不写 |
 
 ```powershell
 node --check index.js
 node --check client.js
 node tests/smoke-host.mjs
+node tests/smoke-relation-tool.mjs
 node tests/smoke-client.mjs "<react 所在 node_modules 目录>"
 node tests/interaction-history.mjs "<react 目录>"
 node tests/interaction-hooks.mjs "<react 目录>"
@@ -206,3 +244,4 @@ node tests/smoke-live.mjs "<react 目录>" http://127.0.0.1:<当前 GUI 端口>
 
 - 前端（`client.js`）：刷新浏览器页面（Ctrl+R）即可。
 - 宿主（`index.js`）：不热更新，需要重启 DSH 宿主，或把 `@local/dsh-filegraph` 停用再启用一次。
+- 模型工具（`relation_draw`）跟着宿主走：重启之后才会出现在模型工具集里；插件加载失败时整个面板会显示「宿主没有返回数据」。

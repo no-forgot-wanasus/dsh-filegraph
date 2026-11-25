@@ -14,6 +14,18 @@ import os from 'node:os'
 export const name = 'filegraph'
 export const inject = ['tools', 'webServer', 'workingDirectory']
 
+/**
+ * 模型工具的包装函数：宿主提供了 @deepseek-ai/dsh-tools 就用它的 defineTool，
+ * 没有就退回裸定义（本机 node 直接跑测试时走这条）。
+ */
+let defineTool = (definition) => definition
+try {
+  const toolsPackage = await import('@deepseek-ai/dsh-tools')
+  if (toolsPackage && typeof toolsPackage.defineTool === 'function') defineTool = toolsPackage.defineTool
+} catch {
+  /* 没有这个包也不影响插件其余功能 */
+}
+
 const DATA_ROUTE = '/filegraph/data'
 const SETTINGS_ROUTE = '/filegraph/settings'
 const RESET_ROUTE = '/filegraph/reset'
@@ -1023,6 +1035,123 @@ function buildDrawio(flowNodes, flows, knownPositions, groups, notes) {
 
 /** 把 .drawio 画布翻译成 节点（id/名字）+ 连线（按 id） + 每个节点的画布坐标。
  *  名字不截断：用户明确要求长名字原样保留。 */
+/* ------------------------------------------------------------ AI 画图：布局与交叉判定
+ *
+ * 模型没有自己的工具时只能手写 XML；这两个函数让工具能「按画布真实画法」摆位、验线。
+ * 尺寸与走线照抄 client.js 的关系画布：节点 178×34，连线 = 节点右缘中点到目标左缘中点的
+ * 三次贝塞尔（bend = max(40, |dx|*0.45)），所以判出来的交叉和屏幕上看到的一致。 */
+
+const DRAW_NODE_W = 178
+const DRAW_NODE_H = 34
+
+/** 与 buildDrawio 相同的分层摆位（有现成坐标就保留）。 */
+function layoutFlow(nodes, flows, knownPositions) {
+  const ids = new Set(nodes.map((n) => n.id))
+  const incoming = new Map()
+  const outgoing = new Map()
+  for (const edge of flows) {
+    if (!ids.has(edge.fromId) || !ids.has(edge.toId)) continue
+    if (!incoming.has(edge.toId)) incoming.set(edge.toId, [])
+    incoming.get(edge.toId).push(edge.fromId)
+    if (!outgoing.has(edge.fromId)) outgoing.set(edge.fromId, [])
+    outgoing.get(edge.fromId).push(edge.toId)
+  }
+  const level = new Map()
+  let frontier = nodes.map((n) => n.id).filter((id) => (incoming.get(id) || []).length === 0)
+  for (const id of frontier) level.set(id, 0)
+  let depth = 0
+  while (frontier.length > 0 && depth < 12) {
+    depth += 1
+    const next = []
+    for (const id of frontier) {
+      for (const child of outgoing.get(id) || []) {
+        if (level.has(child)) continue
+        level.set(child, depth)
+        next.push(child)
+      }
+    }
+    frontier = next
+  }
+  const columns = new Map()
+  for (const node of nodes) {
+    const lv = level.get(node.id) ?? 0
+    if (!columns.has(lv)) columns.set(lv, [])
+    columns.get(lv).push(node.id)
+  }
+  const positions = {}
+  for (const [lv, list] of columns) list.forEach((id, row) => { positions[id] = { x: lv * 250, y: row * 90 } })
+  if (knownPositions && typeof knownPositions === 'object') {
+    for (const [id, pos] of Object.entries(knownPositions)) {
+      if (!ids.has(id) || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue
+      positions[id] = { x: Math.round(pos.x), y: Math.round(pos.y) }
+    }
+  }
+  return positions
+}
+
+function drawBezier(from, to) {
+  const a = { x: from.x + DRAW_NODE_W, y: from.y + DRAW_NODE_H / 2 }
+  const b = { x: to.x, y: to.y + DRAW_NODE_H / 2 }
+  const bend = Math.max(40, Math.abs(b.x - a.x) * 0.45)
+  const c1 = { x: a.x + bend, y: a.y }
+  const c2 = { x: b.x - bend, y: b.y }
+  const points = []
+  for (let i = 0; i <= 24; i += 1) {
+    const t = i / 24
+    const u = 1 - t
+    points.push({
+      x: u * u * u * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * b.x,
+      y: u * u * u * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * b.y,
+    })
+  }
+  return points
+}
+
+function drawSegmentsCross(a, b, c, d) {
+  const d1 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+  const d2 = (b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x)
+  const d3 = (d.x - c.x) * (a.y - c.y) - (d.y - c.y) * (a.x - c.x)
+  const d4 = (d.x - c.x) * (b.y - c.y) - (d.y - c.y) * (b.x - c.x)
+  return d1 * d2 < 0 && d3 * d4 < 0
+}
+
+/** 不同灰线相交的地方（自环、悬空、缺坐标的线不参与）。 */
+function drawCrossings(nodes, flows, positions) {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const paths = []
+  for (const edge of flows) {
+    if (edge.fromId === edge.toId) continue
+    const from = positions[edge.fromId]
+    const to = positions[edge.toId]
+    if (!from || !to) continue
+    paths.push({ edge, points: drawBezier(from, to) })
+  }
+  const found = []
+  for (let i = 0; i < paths.length; i += 1) {
+    for (let j = i + 1; j < paths.length; j += 1) {
+      const a = paths[i]
+      const b = paths[j]
+      let hit = false
+      for (let p = 0; p + 1 < a.points.length && !hit; p += 1) {
+        for (let q = 0; q + 1 < b.points.length; q += 1) {
+          if (drawSegmentsCross(a.points[p], a.points[p + 1], b.points[q], b.points[q + 1])) {
+            hit = true
+            break
+          }
+        }
+      }
+      if (!hit) continue
+      const nameOf = (edge) => {
+        const from = byId.get(edge.fromId)
+        const to = byId.get(edge.toId)
+        return (edge.verb ? edge.verb + ' ' : '') + (from ? from.name : edge.fromId) + ' → ' + (to ? to.name : edge.toId)
+      }
+      found.push(nameOf(a.edge) + ' × ' + nameOf(b.edge))
+    }
+  }
+  return found
+}
+
 function parseDrawio(rawText) {
   // drawio 的「编辑数据」（UserObject）包着 mxCell：把 label / note 带回内层 mxCell 上再解析
   const text = String(rawText).replace(/<UserObject\b([^>]*)>([\s\S]*?)<\/UserObject>/g, (all, uattrs, inner) => {
@@ -1421,6 +1550,232 @@ export function apply(ctx, config = {}) {
     await flushGraph(entry, active.graphFile)
     sendJson(res, 200, { ok: true, ...(extra || {}), ...(await payloadFor(current, active.root)) })
   }
+
+  /**
+   * 给模型用的画图工具：结构化 ops 直接改当前项目的 `.drawio`。
+   *
+   * 与"AI 手写 XML"的区别：模型给的是节点/关系，不用碰 mxfile 格式；写盘前还会按
+   * 关系画布真实的贝塞尔走线验一遍「不同灰线不许相交」——相交就整次打回、一个字节不写。
+   */
+  ctx.tools.register(defineTool({
+    name: 'relation_draw',
+    description:
+      '在「关系」面板当前这张图（.drawio）上画节点与关系。用结构化 ops 增删改，不用手写 XML。' +
+      '节点名是数据载体：同一范围的多个节点取同一个名字（id 各不相同）。' +
+      '写盘前会检查「不同的灰线不许相交」：相交就整次打回并告知是哪两条线，不会写入任何字节。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ops: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              op: { type: 'string', enum: ['addNode', 'addEdge', 'setNote', 'renameNode', 'removeNode', 'removeEdge', 'move', 'setVerb'] },
+              as: { type: 'string' },
+              id: { type: 'string' },
+              name: { type: 'string' },
+              text: { type: 'string' },
+              verb: { type: 'string' },
+              from: { type: 'string' },
+              to: { type: 'string' },
+              note: { type: 'string' },
+              x: { type: 'number' },
+              y: { type: 'number' },
+            },
+            required: ['op'],
+          },
+        },
+        path: { type: 'string' },
+      },
+      required: ['ops'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          nodeCount: { type: 'number' },
+          edgeCount: { type: 'number' },
+          nodes: { type: 'string' },
+          edges: { type: 'string' },
+          changes: { type: 'array', items: { type: 'string' } },
+          note: { type: 'string' },
+        },
+      },
+      render: (args, value) => [
+        {
+          type: 'text',
+          text:
+            '已写入 ' + value.path + '：' + value.nodeCount + ' 节点 / ' + value.edgeCount + ' 关系' +
+            (Array.isArray(value.changes) && value.changes.length > 0 ? '\n' + value.changes.join('\n') : '') +
+            '\n' + value.note,
+        },
+      ],
+    },
+    async execute(args) {
+      const ops = Array.isArray(args && args.ops) ? args.ops : []
+      if (ops.length === 0) throw new Error('ops 不能为空')
+
+      const current = await ensureState()
+      const records = projectRows(current)
+      const active = records[0]
+      if (!active) throw new Error('还没有记录任何项目：先在面板里新建或打开一张图')
+
+      const drawioPath =
+        args && typeof args.path === 'string' && args.path.trim() ? args.path.trim() : drawioPathOf(current, active)
+      let text = ''
+      try {
+        text = await fsp.readFile(drawioPath, 'utf8')
+      } catch {
+        text = ''
+      }
+      const parsed = parseDrawio(text)
+      const nodes = parsed.nodes.map((n) => ({ id: n.id, name: n.name, kind: n.kind }))
+      const flows = parsed.flows.map((f) => ({ id: f.id, fromId: f.fromId, toId: f.toId, verb: f.verb || '' }))
+      const notes = { ...parsed.notes }
+      const positions = { ...parsed.positions }
+      const aliases = new Map()
+      const changes = []
+
+      let nextNode = 0
+      let nextEdge = 0
+      for (const n of nodes) {
+        const m = /^n(\d+)$/.exec(n.id)
+        if (m) nextNode = Math.max(nextNode, Number(m[1]))
+      }
+      for (const f of flows) {
+        const m = /^e(\d+)$/.exec(f.id || '')
+        if (m) nextEdge = Math.max(nextEdge, Number(m[1]))
+      }
+      const resolveNode = (ref) => {
+        if (typeof ref !== 'string' || ref.length === 0) return null
+        if (aliases.has(ref)) return aliases.get(ref)
+        const byId = nodes.find((n) => n.id === ref)
+        if (byId) return byId.id
+        const byName = nodes.find((n) => n.name === ref)
+        return byName ? byName.id : null
+      }
+
+      for (const op of ops) {
+        if (op === null || typeof op !== 'object') continue
+        const kind = String(op.op || '')
+        if (kind === 'addNode') {
+          const name = String(op.name || '').trim()
+          if (!name) throw new Error('addNode 需要 name')
+          nextNode += 1
+          const id = 'n' + nextNode
+          nodes.push({ id, name, kind: 'node' })
+          if (op.note) notes[name] = String(op.note)
+          if (Number.isFinite(Number(op.x)) && Number.isFinite(Number(op.y))) positions[id] = { x: Math.round(Number(op.x)), y: Math.round(Number(op.y)) }
+          if (typeof op.as === 'string' && op.as.length > 0) aliases.set(op.as, id)
+          changes.push('+ 节点 ' + name + ' (' + id + ')')
+          continue
+        }
+        if (kind === 'addEdge') {
+          const fromId = resolveNode(op.from)
+          const toId = resolveNode(op.to)
+          if (!fromId || !toId) throw new Error('addEdge 的 from/to 找不到：' + String(op.from) + ' / ' + String(op.to))
+          nextEdge += 1
+          const id = 'e' + nextEdge
+          flows.push({ id, fromId, toId, verb: String(op.verb || '').trim() })
+          if (typeof op.as === 'string' && op.as.length > 0) aliases.set(op.as, id)
+          const nameOf = (nodeId) => (nodes.find((n) => n.id === nodeId) || {}).name || nodeId
+          changes.push('+ 关系 ' + nameOf(fromId) + ' → ' + nameOf(toId))
+          continue
+        }
+        if (kind === 'setNote') {
+          const name = String(op.name || '').trim()
+          if (!name) throw new Error('setNote 需要 name')
+          notes[name] = String(op.text || '')
+          changes.push('~ 备注 ' + name)
+          continue
+        }
+        if (kind === 'renameNode') {
+          const id = resolveNode(op.id || op.name)
+          if (!id) throw new Error('renameNode 找不到节点：' + String(op.id || op.name))
+          const node = nodes.find((n) => n.id === id)
+          const oldName = node.name
+          const oldNote = notes[oldName]
+          node.name = String(op.name || '').trim() || oldName
+          if (oldNote !== undefined && notes[node.name] === undefined) notes[node.name] = oldNote
+          changes.push('~ 改名 ' + oldName + ' → ' + node.name)
+          continue
+        }
+        if (kind === 'removeNode') {
+          const id = resolveNode(op.id || op.name)
+          if (!id) throw new Error('removeNode 找不到节点：' + String(op.id || op.name))
+          const idx = nodes.findIndex((n) => n.id === id)
+          const [removed] = nodes.splice(idx, 1)
+          for (let i = flows.length - 1; i >= 0; i -= 1) {
+            if (flows[i].fromId === id || flows[i].toId === id) flows.splice(i, 1)
+          }
+          delete positions[id]
+          changes.push('- 节点 ' + removed.name + ' (' + id + ')')
+          continue
+        }
+        if (kind === 'removeEdge') {
+          const id = String(op.id || '')
+          const idx = flows.findIndex((f) => f.id === id)
+          if (idx < 0) throw new Error('removeEdge 找不到关系：' + id)
+          flows.splice(idx, 1)
+          changes.push('- 关系 ' + id)
+          continue
+        }
+        if (kind === 'setVerb') {
+          const id = String(op.id || '')
+          const flow = flows.find((f) => f.id === id)
+          if (!flow) throw new Error('setVerb 找不到关系：' + id)
+          flow.verb = String(op.verb || '').trim()
+          changes.push('~ 动作词 ' + id + ' = ' + flow.verb)
+          continue
+        }
+        if (kind === 'move') {
+          const id = resolveNode(op.id || op.name)
+          if (!id) throw new Error('move 找不到节点：' + String(op.id || op.name))
+          if (!Number.isFinite(Number(op.x)) || !Number.isFinite(Number(op.y))) throw new Error('move 需要 x/y')
+          positions[id] = { x: Math.round(Number(op.x)), y: Math.round(Number(op.y)) }
+          changes.push('~ 位置 ' + id)
+          continue
+        }
+        throw new Error('不认识的 op：' + kind)
+      }
+
+      // 摆位：有坐标就用坐标，其余按层自动排（与 buildDrawio 同一套）
+      const layout = layoutFlow(nodes, flows, positions)
+
+      // 写盘之前验线：不同灰线相交就整次打回
+      const crossings = drawCrossings(nodes, flows, layout)
+      if (crossings.length > 0) {
+        const shown = crossings.slice(0, 8)
+        throw new Error(
+          '关系图打回重画：不同灰线相交（这次一个字节都没有写入）。\n  ' +
+            shown.join('\n  ') +
+            (crossings.length > shown.length ? '\n  …… 另有 ' + (crossings.length - shown.length) + ' 处' : '') +
+            '\n规矩：两条不同的线不许相交；要回环就用同名节点（新 id）把线引开，别让一条线跨过别的线。改完整套重发。',
+        )
+      }
+
+      const entry = await graphFor(active.graphFile, active.root)
+      const groups = entry.graph && entry.graph.groups ? entry.graph.groups : {}
+      const xml = buildDrawio(nodes, flows, layout, groups, notes)
+      await fsp.writeFile(drawioPath, xml, 'utf8')
+      await syncDrawio(current)
+
+      const nameOf = (id) => (nodes.find((n) => n.id === id) || {}).name || id
+      return {
+        path: drawioPath,
+        nodeCount: nodes.length,
+        edgeCount: flows.length,
+        nodes: nodes.map((n) => n.name + '(' + n.id + ')').join('、'),
+        edges: flows.map((f) => (f.verb ? f.verb + ' ' : '') + nameOf(f.fromId) + ' → ' + nameOf(f.toId)).join('、'),
+        changes: changes,
+        note: '已按画布真实走线验过：没有灰线相交',
+      }
+    },
+  }))
 
   const postRoute = (path, handler, options) => routeOf(ctx, path, handler, options)
   const getRoute = (path, handler, options) => routeOf(ctx, path, handler, { ...options, method: 'GET' })

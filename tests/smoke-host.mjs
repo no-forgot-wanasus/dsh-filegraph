@@ -10,10 +10,12 @@ fs.writeFileSync(path.join(T, 'a.js'), "import b from './b.js'\nexport const x =
 fs.writeFileSync(path.join(T, 'b.js'), 'export default 2\n')
 
 const handlers = new Map()
+const tools = new Map()
 const ctx = {
   effect: (fn) => fn(),
   on: () => {},
   webServer: { register: (r) => handlers.set(r.path, r.handler) },
+  tools: { register: (t) => { tools.set(t.name, t); return () => tools.delete(t.name) } },
   workingDirectory: { defaultDirectory: T, ensure: async () => T },
 }
 

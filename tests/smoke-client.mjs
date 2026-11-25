@@ -120,7 +120,7 @@ const check = (html, label, must) => {
 }
 
 const base = render(null, '关系画布')
-check(base, '关系画布', ['全部 ▾', '文件 ▾', '此节点关系', '此节点链路', '⋯', '说明', '刷新', '关闭', '启动脚本', 'main', '节点组 1', '激活'])
+check(base, '关系画布', ['复制文件地址', '文件 ▾', '说明', '刷新', '关闭', '启动脚本', 'main', '节点组 1', '激活'])
 check(base, '往期历史', ['历史', '共 2 个版本', '版本 2', '版本 1', '保存快照', '对照显示', '回到此版本'])
 
 // 没有历史文件时：右上窗口明确写「无往期版本」
@@ -140,7 +140,7 @@ const menus = render((s) =>
   s.replace('      fileMenu: false,', '      fileMenu: true,')
    .replace('      viewMenu: false,', '      viewMenu: true,')
    .replace('      moreMenu: false,', '      moreMenu: true,'), '三个菜单都展开')
-check(menus, '菜单', ['新建…', '恢复', '导出关系文档…', '添加节点组', '此节点链路', '清空这张图'])
+check(menus, '菜单', ['新建…', '恢复', '导出关系文档…', '添加工作流预设', '设置…', '清空这张图'])
 
 const prompt = render((s) => s.replace('      fileMenu: false,', '      fileMenu: true,').replace("      filePrompt: '',", "      filePrompt: 'open',"), '文件浏览器')
 check(prompt, '文件浏览器', ['打开', '取消'])
