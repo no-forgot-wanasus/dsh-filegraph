@@ -2,7 +2,7 @@
 <mxfile host="filegraph"><diagram id="fg" name="关系"><mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root>
 <mxCell id="0"/>
 <mxCell id="1" parent="0"/>
-<mxCell id="n1" value="醒（节律）" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="820" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n1" value="醒（节律）" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="-114" y="818" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n2" value="私信两分钟一查" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="970" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n7" value="组织一句话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="735" y="40" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n8" value="过词表删句" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="735" y="110" width="170" height="48" as="geometry"/></mxCell>
@@ -18,7 +18,7 @@
 <mxCell id="n19" value="看屏幕画面" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="250" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n20" value="读房间对话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="180" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n21" value="等心跳叫醒" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="255" y="760" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n22" value="play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="240" y="800" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n22" value="play 线" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="276" y="826" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n23" value="读临时记忆" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1215" y="40" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n24" value="发出私信" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1847" y="-56" width="170" height="48" as="geometry"/></mxCell>
 <mxCell id="n25" value="在悬浮窗说话" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1878" y="138" width="170" height="48" as="geometry"/></mxCell>

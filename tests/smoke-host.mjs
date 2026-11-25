@@ -316,6 +316,44 @@ const undoPath = activeGraphFile + '.undo.json'
 const undoFile = fs.existsSync(undoPath) ? JSON.parse(fs.readFileSync(undoPath, 'utf8')) : null
 assert('回退栈落盘了', Array.isArray(undoFile) && undoFile.length > 0, undoPath)
 assert('超出 10 步的旧快照不保存', Array.isArray(undoFile) && undoFile.length <= 10, undoFile ? String(undoFile.length) : 'no file')
+assert('落盘的快照带版本号（往期历史要按编号排）', undoFile && undoFile.every((item) => item && Number(item.n) > 0 && typeof item.graph === 'string'), JSON.stringify(undoFile && undoFile[0] && Object.keys(undoFile[0])))
+
+// 往期历史 = 手动文件快照（每点一次新增一份「版本 N」；真源不做自动保存）
+const drawioNow = (await data()).settings.drawioFile
+const histDir = path.join(path.dirname(drawioNow), path.basename(drawioNow).replace(/\.[^.]+$/, '') + ' 历史')
+const emptyHist = await step('history list', '/filegraph/history', { action: 'list' })
+assert('还没存快照时列表为空', ((emptyHist.json && emptyHist.json.history) || []).length === 0, JSON.stringify(emptyHist.json))
+const nodesAtSnap1 = (await data()).flowNodes.length
+const snap1 = await step('history snapshot 1', '/filegraph/history', { action: 'snapshot' })
+assert('手动快照 1：版本 1', snap1.json && snap1.json.snapshot && snap1.json.snapshot.n === 1, JSON.stringify(snap1.json && snap1.json.snapshot))
+assert('快照是真文件：版本 1.drawio + 版本 1.graph.json',
+  fs.existsSync(path.join(histDir, '版本 1.drawio')) && fs.existsSync(path.join(histDir, '版本 1.graph.json')),
+  fs.existsSync(histDir) ? fs.readdirSync(histDir).join(' ') : 'no dir')
+await step('add node after snapshot', '/filegraph/node', { name: '快照后新增' })
+const snap2 = await step('history snapshot 2', '/filegraph/history', { action: 'snapshot' })
+assert('再点保存快照 = 新增版本 2（不覆盖）',
+  snap2.json && (snap2.json.history || []).length === 2 && snap2.json.snapshot.n === 2,
+  JSON.stringify(snap2.json && snap2.json.snapshot))
+assert('两个手动快照文件都在', fs.existsSync(path.join(histDir, '版本 2.drawio')), fs.readdirSync(histDir).join(' '))
+
+// 普通「保存」只写正在用的 .drawio，不再自动生成快照
+await step('save once', '/filegraph/save', {})
+const afterSave = await data()
+assert('保存不会自动新增快照（真源不自动快照）', (afterSave.history || []).length === 2, JSON.stringify((afterSave.history || []).map((v) => v.n)))
+
+const shown = await step('history show', '/filegraph/history', { action: 'show', n: 1 })
+assert('能取到手动快照里的图（对照用）', shown.json && Array.isArray(shown.json.version.flowNodes) && typeof shown.json.version.flowPositions === 'object', JSON.stringify(shown.json && shown.json.version && Object.keys(shown.json.version)))
+const restored = await step('history restore', '/filegraph/history', { action: 'restore', n: 1 })
+assert('能回到这份快照', restored.json && restored.json.ok === true, JSON.stringify(restored.json && restored.json.error))
+assert('回滚后节点数等于快照时的数量', (await data()).flowNodes.length === nodesAtSnap1, JSON.stringify({ now: (await data()).flowNodes.length, want: nodesAtSnap1 }))
+const beforeDeleteCount = ((await data()).history || []).length
+const del = await step('history delete', '/filegraph/history', { action: 'delete', n: 1 })
+assert('能删除快照', del.json && del.json.ok === true && (del.json.history || []).length === beforeDeleteCount - 1, JSON.stringify(del.json && del.json.error))
+assert('删除后快照文件也删了', !fs.existsSync(path.join(histDir, '版本 1.drawio')) && !fs.existsSync(path.join(histDir, '版本 1.graph.json')), '')
+const snap3 = await step('history snapshot after delete', '/filegraph/history', { action: 'snapshot' })
+assert('删掉后编号继续往上、不复用旧号', snap3.json && snap3.json.snapshot.n === 3, JSON.stringify(snap3.json && snap3.json.snapshot))
+await step('history delete 2', '/filegraph/history', { action: 'delete', n: 2 })
+await step('history delete 3', '/filegraph/history', { action: 'delete', n: 3 })
 
 // 工作流预设：一键画模板（主干一条线 + 侧枝）
 await step('reset before preset', '/filegraph/reset', {})

@@ -57,6 +57,11 @@ const fixture = {
   },
   positions: { 'file:a.js': { x: 10, y: 10 } },
   projects: [{ root: 'D:\\demo', graphFile: 'D:\\demo\\graph.json', nodeCount: 2 }],
+  // 往期历史：元数据（版本号 / 时间 / 计数）
+  history: [
+    { n: 1, at: 1763550000000, nodes: 2, edges: 1, groups: 0 },
+    { n: 2, at: 1763553600000, nodes: 3, edges: 2, groups: 1 },
+  ],
 }
 
 const listeners = {}
@@ -116,6 +121,14 @@ const check = (html, label, must) => {
 
 const base = render(null, '关系画布')
 check(base, '关系画布', ['全部 ▾', '文件 ▾', '此节点关系', '此节点链路', '⋯', '说明', '刷新', '关闭', '启动脚本', 'main', '节点组 1', '激活'])
+check(base, '往期历史', ['历史', '共 2 个版本', '版本 2', '版本 1', '保存快照', '对照显示', '回到此版本'])
+
+// 没有历史文件时：右上窗口明确写「无往期版本」
+const savedFixture = global.window.__FIXTURE__
+global.window.__FIXTURE__ = { ...fixture, history: [] }
+const noHistory = render(null, '无往期版本')
+global.window.__FIXTURE__ = savedFixture
+check(noHistory, '无往期版本', ['无往期版本'])
 
 const inGroup = render((s) => s.replace('      groupStack: [],', "      groupStack: ['" + groupId + "'],"), '节点组内部')
 check(inGroup, '节点组内部', ['节点组 1', '组输入', '组输出', '分布点', '密度', '网格', '返回', '＋ 节点'])

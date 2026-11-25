@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-filegraph",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "关系插件：节点、关系、可打开的节点组，画在一张可保存的文件里。",

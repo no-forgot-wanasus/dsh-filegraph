@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
     const OPEN_URL = '/filegraph/open'
     const DRAG_URL = '/filegraph/drag'
     const EXPORT_URL = '/filegraph/export'
+    const HISTORY_URL = '/filegraph/history'
     const POST_HEADERS = { 'content-type': 'application/json', 'x-filegraph': '1' }
 
     const WINDOW_COLOR = '#8b5cf6'
@@ -104,6 +105,11 @@ window.__ModuleLoader__.load({
       helpOpen: false,
       // 节点组：打开的是哪一级（栈顶 = 当前编辑的组）
       groupStack: [],
+      // 往期历史：眼睛 = 这个版本叠在画布上对照；models 缓存版本内容（只读）
+      historyEyes: {},
+      historyPick: 0,
+      historyModels: {},
+      historyFile: '',
     }
     const subscribers = new Set()
     let revision = 0
@@ -147,6 +153,14 @@ window.__ModuleLoader__.load({
         if (json.ok !== true) throw new Error(json.error || '读取失败')
         state.data = json
         state.error = null
+        // 换了一张图：旧的对照缓存全部作废（版本号是每张图各自的）
+        const nextFile = (json.active && json.active.graphFile) || ''
+        if (nextFile !== state.historyFile) {
+          state.historyFile = nextFile
+          state.historyEyes = {}
+          state.historyPick = 0
+          state.historyModels = {}
+        }
         // 旧宿主没有 flowNodes / 节点组接口：明确报出来，别让用户对着空白画布猜
         state.hostLegacy = !Array.isArray(json.flowNodes) && Array.isArray(json.flows)
         const nextPos = {}
@@ -786,7 +800,7 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    function FlowCanvas({ nodes, edges, positions, selected, picked, keepSelection, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onCut, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
+    function FlowCanvas({ nodes, edges, ghosts, positions, selected, picked, keepSelection, onSelect, onPick, onMove, onConnect, onRenameNode, onRenameEdge, onCutEdge, onCut, onContextNode, onContextEdge, onContextBlank, onPortContext, onViewport, viewKey }) {
       const svgRef = useRef(null)
       const [view, setView] = useState({ k: 1, dx: 0, dy: 0 })
       const viewRef = useRef(view)
@@ -818,8 +832,23 @@ window.__ModuleLoader__.load({
           maxX = Math.max(maxX, pos.x + m.w)
           maxY = Math.max(maxY, pos.y + m.h)
         }
+        // 往期对照里的旧节点也要在视野里（它们可能早就被挪到当前范围外了）
+        for (const ghost of ghosts || []) {
+          const model = ghost.model || {}
+          const oldPositions = model.flowPositions || {}
+          for (const node of model.flowNodes || []) {
+            if (nodes.some((item) => item.nodeId === node.id)) continue
+            const pos = oldPositions[node.id]
+            if (!pos) continue
+            const m = flowMetrics({ kind: node.kind === 'group' ? 'group' : 'node', inputs: [], outputs: [] })
+            minX = Math.min(minX, pos.x)
+            minY = Math.min(minY, pos.y)
+            maxX = Math.max(maxX, pos.x + m.w)
+            maxY = Math.max(maxY, pos.y + m.h)
+          }
+        }
         return { x: minX - 70, y: minY - 70, w: maxX - minX + 140, h: maxY - minY + 140 }
-      }, [nodes, positions])
+      }, [nodes, positions, ghosts])
 
       const key = viewKey || 'flow'
       const outside =
@@ -1071,6 +1100,77 @@ window.__ModuleLoader__.load({
 
       const nodeById = new Map(nodes.map((node) => [node.id, node]))
 
+      /**
+       * 往期历史对照（只读叠加）：
+       *   back  = 旧版本有、现在没有的节点（虚线灰框）和关系（虚线灰线）；
+       *   front = 现在有、旧版本没有的节点（绿色虚线外框）。
+       * 两端都在的节点一律按现在的位置画，这样看到的是结构差异，不是当初的排版。
+       */
+      const ghostShapes = useMemo(() => {
+        const list = ghosts || []
+        if (list.length === 0) return null
+        const back = []
+        const front = []
+        const currentIds = new Set(nodes.map((node) => node.nodeId))
+        const currentEdges = new Set(edges.map((edge) => String(edge.from).replace(/^f:/, '') + '|' + String(edge.to).replace(/^f:/, '') + '|' + (edge.verb || '')))
+        const halo = new Set()
+        const endpointOf = (id, side, oldNodes, oldPositions) => {
+          const current = nodeById.get('f:' + id)
+          if (current) {
+            const pos = posOf(current.id)
+            if (pos) {
+              const m = flowMetrics(current)
+              return { x: side === 'out' ? pos.x + m.w : pos.x, y: pos.y + (m.labeled ? FLOW_HEAD + 6 + FLOW_ROW / 2 : m.h / 2) }
+            }
+          }
+          const base = oldPositions[id] || { x: 0, y: 0 }
+          const oldNode = oldNodes.find((node) => node.id === id) || {}
+          const m = flowMetrics({ kind: oldNode.kind === 'group' ? 'group' : 'node', inputs: [], outputs: [] })
+          return { x: side === 'out' ? base.x + m.w : base.x, y: base.y + (oldNode.kind === 'group' ? FLOW_HEAD + 6 + FLOW_ROW / 2 : m.h / 2) }
+        }
+        for (const item of list) {
+          const model = item.model || {}
+          const oldNodes = Array.isArray(model.flowNodes) ? model.flowNodes : []
+          const oldPositions = model.flowPositions || {}
+          const oldIds = new Set(oldNodes.map((node) => node.id))
+          for (const node of oldNodes) {
+            if (currentIds.has(node.id)) continue
+            const base = oldPositions[node.id] || { x: 0, y: 0 }
+            const m = flowMetrics({ kind: node.kind === 'group' ? 'group' : 'node', inputs: [], outputs: [] })
+            back.push(
+              h('g', { key: 'gh' + item.n + ':' + node.id, transform: 'translate(' + base.x + ' ' + base.y + ')', style: { opacity: 0.85, pointerEvents: 'none' } },
+                h('rect', { width: m.w, height: m.h, rx: 9, fill: 'transparent', stroke: '#94a3b8', strokeWidth: 1.4, strokeDasharray: '6 4' }),
+                h('text', { x: 10, y: 20, fontSize: 11, fill: '#94a3b8', style: { userSelect: 'none' } }, node.name),
+              ),
+            )
+          }
+          for (const flow of Array.isArray(model.flows) ? model.flows : []) {
+            const key = flow.fromId + '|' + flow.toId + '|' + (flow.verb || '')
+            if (currentEdges.has(key)) continue
+            const a = endpointOf(flow.fromId, 'out', oldNodes, oldPositions)
+            const b = endpointOf(flow.toId, 'in', oldNodes, oldPositions)
+            back.push(h('path', {
+              key: 'ghe' + item.n + ':' + key,
+              d: 'M' + a.x + ' ' + a.y + ' C' + (a.x + 56) + ' ' + a.y + ', ' + (b.x - 56) + ' ' + b.y + ', ' + b.x + ' ' + b.y,
+              fill: 'none', stroke: '#94a3b8', strokeWidth: 1.3, strokeDasharray: '5 4', style: { pointerEvents: 'none' },
+            }))
+          }
+          for (const node of nodes) {
+            if (oldIds.has(node.nodeId) || halo.has(node.id)) continue
+            const pos = posOf(node.id)
+            if (!pos) continue
+            halo.add(node.id)
+            const m = flowMetrics(node)
+            front.push(h('rect', {
+              key: 'ghn' + item.n + ':' + node.id,
+              x: pos.x - 4, y: pos.y - 4, width: m.w + 8, height: m.h + 8, rx: 11,
+              fill: 'none', stroke: '#22c55e', strokeWidth: 1.2, strokeDasharray: '4 4', style: { pointerEvents: 'none' },
+            }))
+          }
+        }
+        return { back, front }
+      }, [ghosts, nodes, edges, positions, live])
+
       return h('div',
         { style: { position: 'relative', flex: 1, minHeight: 0, background: 'var(--dsw-alias-bg-base)', userSelect: 'none', WebkitUserSelect: 'none' } },
         h('svg',
@@ -1217,6 +1317,7 @@ window.__ModuleLoader__.load({
                   })
                 })()
               : null,
+            ghostShapes ? ghostShapes.back : null,
             nodes.map((node) => {
               const pos = posOf(node.id)
               if (!pos) return null
@@ -1331,6 +1432,7 @@ window.__ModuleLoader__.load({
                 h('title', null, showLabels ? node.label + '（节点组）' : node.label),
               )
             }),
+            ghostShapes ? ghostShapes.front : null,
           ),
         ),
         h('div',
@@ -1346,6 +1448,95 @@ window.__ModuleLoader__.load({
       return h('button', { key: label, onClick, style: { minWidth: 30, height: 26, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', color: 'var(--dsw-alias-label-secondary)', fontSize: 12, cursor: 'pointer', }, }, label,)
     }
 
+    /* ------------------------------------------------------ 往期历史 */
+
+    const historyIconStyle = (on) => ({ flex: '0 0 auto', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer', color: on ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-secondary)', opacity: on ? 1 : 0.7 })
+
+    function eyeGlyph(on) {
+      return h('svg', { viewBox: '0 0 16 16', width: 13, height: 13, 'aria-hidden': true, style: { display: 'block' } },
+        h('path', { d: 'M1.5 8S4.1 3.9 8 3.9 14.5 8 14.5 8 11.9 12.1 8 12.1 1.5 8 1.5 8Z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2 }),
+        on
+          ? h('circle', { cx: 8, cy: 8, r: 2.1, fill: 'currentColor' })
+          : h('path', { d: 'M2.6 13.4 13.4 2.6', stroke: 'currentColor', strokeWidth: 1.2 }),
+      )
+    }
+
+    function restoreGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 13, height: 13, 'aria-hidden': true, style: { display: 'block' } },
+        h('path', { d: 'M3.2 3.2V6.6h3.4', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        h('path', { d: 'M3.5 6.4A5 5 0 1 1 8 13', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+      )
+    }
+
+    function trashGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 13, height: 13, 'aria-hidden': true, style: { display: 'block' } },
+        h('path', { d: 'M3.4 4.6h9.2M6.4 4.6V3.2h3.2v1.4M4.6 4.6l.6 8h5.6l.6-8', fill: 'none', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      )
+    }
+
+    /** 版本行里的时间：今天的只写时分，更早的带月-日（258px 宽塞不下完整日期）。 */
+    function historyTimeOf(ts) {
+      if (!ts) return ''
+      const date = new Date(ts)
+      const pad = (n) => String(n).padStart(2, '0')
+      const hm = pad(date.getHours()) + ':' + pad(date.getMinutes())
+      const now = new Date()
+      const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
+      return sameDay ? hm : pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + hm
+    }
+
+    /**
+     * 右上窗口：往期历史（手动保存的文件快照）。版本号从大到小排（新的在上），列表自己滚。
+     * 顶部「保存快照」= 与保存分开的独立动作，每点一次新增一份「版本 N」；真源不自动保存。
+     * 行内：眼睛 = 叠到画布对照；时钟 = 回到这一版；垃圾桶只在选中这一行后出现。
+     */
+    function HistoryPanel({ versions, eyes, pick, onPick, onToggle, onRestore, onSnapshot, onDelete }) {
+      const list = (versions || []).slice().sort((a, b) => b.n - a.n)
+      return h('div',
+        { style: { display: 'flex', flexDirection: 'column', flex: '0 0 46%', minHeight: 96, maxHeight: '58%', borderBottom: '1px solid var(--dsw-alias-border-l1)' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 4px' } },
+          h('span', { style: { fontSize: 11, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, '历史'),
+          h('span', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } }, list.length ? '共 ' + list.length + ' 个版本' : ''),
+          h('button',
+            {
+              onClick: onSnapshot,
+              title: '保存快照',
+              style: { marginLeft: 'auto', height: 22, padding: '0 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap' },
+            },
+            '保存快照',
+          ),
+        ),
+        h('div',
+          { style: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 8px 6px' } },
+          list.length === 0
+            ? h('div', { style: { padding: '4px 2px', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '无往期版本')
+            : list.map((item) => {
+                const open = !!eyes[item.n]
+                return h('div',
+                  { key: 'h' + item.n, style: { display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7, background: pick === item.n || open ? 'var(--dsw-alias-bg-layer-2)' : 'transparent' } },
+                  h('button',
+                    {
+                      onClick: () => onPick(item.n),
+                      style: { flex: 1, minWidth: 0, padding: '4px 6px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer' },
+                    },
+                    h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+                      h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap' } }, '版本 ' + item.n),
+                      h('span', { style: { fontSize: 9, color: 'var(--dsw-alias-label-secondary)', marginLeft: 'auto', whiteSpace: 'nowrap' } }, historyTimeOf(item.at)),
+                    ),
+                    h('div', { style: { fontSize: 9, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+                      item.nodes + ' 节点 · ' + item.edges + ' 关系' + (item.groups ? ' · ' + item.groups + ' 组' : '')),
+                  ),
+                  h('button', { onClick: () => onToggle(item.n), title: '对照显示', style: historyIconStyle(open) }, eyeGlyph(open)),
+                  h('button', { onClick: () => onRestore(item.n), title: '回到此版本', style: historyIconStyle(false) }, restoreGlyph()),
+                  pick === item.n
+                    ? h('button', { onClick: () => onDelete(item.n), title: '删除快照', style: historyIconStyle(false) }, trashGlyph())
+                    : null,
+                )
+              }),
+        ),
+      )
+    }
+
     /* ------------------------------------------------------ 详情栏 */
 
     const primaryButton = { height: 26, padding: '0 10px', borderRadius: 7, border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: '#fff', fontSize: 11, cursor: 'pointer' }
@@ -1353,6 +1544,39 @@ window.__ModuleLoader__.load({
     const menuItemStyle = { textAlign: 'left', padding: '6px 8px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 11, cursor: 'pointer' }
     const ghostButton = { height: 28, padding: '0 10px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, cursor: 'pointer' }
     const inputStyle = { width: '100%', height: 26, padding: '0 8px', borderRadius: 7, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)', fontSize: 11, boxSizing: 'border-box' }
+
+    /**
+     * 复制一段文本到剪贴板：优先 Clipboard API，失败回落到临时 textarea + execCommand。
+     * （WebView 里 Clipboard API 偶尔因为没焦点/非安全上下文被拒，回落那一手是兜底。）
+     * @returns {Promise<boolean>} 是否真的复制成功
+     */
+    const copyText = async (text) => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text)
+          return true
+        }
+      } catch { /* 落到下面的兜底 */ }
+      try {
+        const area = document.createElement('textarea')
+        area.value = text
+        area.setAttribute('readonly', '')
+        area.style.position = 'fixed'
+        area.style.top = '-1000px'
+        area.style.opacity = '0'
+        document.body.appendChild(area)
+        area.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(area)
+        return !!ok
+      } catch { return false }
+    }
+
+    /** 当前这张图落在哪个文件上（没有就返回空串）。 */
+    const currentDrawioPath = () => {
+      const settings = (state.data && state.data.settings) || {}
+      return String(settings.drawioFile || '').trim()
+    }
 
     function Details({ item, items, edges, mode, onMode, note, onNoteChange, onOpenGroup }) {
       const byId = useMemo(() => {
@@ -1365,7 +1589,7 @@ window.__ModuleLoader__.load({
       if (!item) {
         return h('div',
           {
-            style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
+            style: { width: '100%', flex: '1 1 auto', minHeight: 0, padding: '12px 14px', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
           },
           '点一个节点看详情',
         )
@@ -1410,7 +1634,7 @@ window.__ModuleLoader__.load({
         const downstream = edges.filter((edge) => edge.from === item.id).map((edge) => ({ label: (byId.get(edge.to) || {}).label || edge.to, verb: edge.verb || '' }))
         return h('div',
         {
-          style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', gap: 8, },
+          style: { width: '100%', flex: '1 1 auto', minHeight: 0, padding: '12px 14px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', gap: 8, },
           },
           noteBox,
           h('div',
@@ -1901,6 +2125,94 @@ window.__ModuleLoader__.load({
         if (json && json.ok === false) state.notice = json.error || '没有可回退的操作'
         else state.notice = '已回退上一步'
         await load(undefined)
+        notify()
+      } catch (error) {
+        state.error = String((error && error.message) || error)
+        notify()
+      }
+    }
+
+    /** 取某个版本的图（只读，按版本号缓存）。 */
+    async function loadHistoryModel(n) {
+      if (state.historyModels[n]) return state.historyModels[n]
+      try {
+        const json = await postJson(HISTORY_URL, { action: 'show', n })
+        state.historyModels = { ...state.historyModels, [n]: json.version }
+        notify()
+        return json.version
+      } catch (error) {
+        state.error = String((error && error.message) || error)
+        notify()
+        return null
+      }
+    }
+
+    /** 点一行版本：选中它并把它的对照叠到画布上（再点一次只切眼睛）。 */
+    /** 点一行只选中（出现删除按钮）；开对照是眼睛的事，别让"选中"顺手把虚线框糊到画布上。 */
+    async function pickHistory(n) {
+      state.historyPick = n
+      notify()
+    }
+
+    async function toggleHistory(n) {
+      const next = { ...state.historyEyes }
+      if (next[n]) delete next[n]
+      else {
+        next[n] = true
+        state.historyPick = n
+      }
+      state.historyEyes = next
+      notify()
+      if (next[n]) await loadHistoryModel(n)
+    }
+
+    /** 回到某个版本：先给当前版本留一份快照，所以这一步本身也能 Ctrl+Z 回来。 */
+    async function restoreHistory(n) {
+      try {
+        const json = await postJson(HISTORY_URL, { action: 'restore', n })
+        state.historyEyes = {}
+        state.historyPick = 0
+        state.historyModels = {}
+        state.data = json
+        state.error = null
+        state.notice = '已回到版本 ' + n
+        notify()
+      } catch (error) {
+        state.error = String((error && error.message) || error)
+        notify()
+      }
+    }
+
+    /** 手动存一份文件快照（与「保存」分开；每点一次新增一份，不自动生成）。 */
+    async function saveSnapshot() {
+      try {
+        const json = await postJson(HISTORY_URL, { action: 'snapshot' })
+        const list = Array.isArray(json && json.history) ? json.history : []
+        if (state.data) state.data = { ...state.data, history: list }
+        if (json && json.snapshot) state.historyPick = json.snapshot.n
+        state.error = null
+        state.notice = json && json.snapshot ? '已保存快照：版本 ' + json.snapshot.n : '已保存快照'
+        notify()
+      } catch (error) {
+        state.error = String((error && error.message) || error)
+        notify()
+      }
+    }
+
+    /** 删掉一份快照文件（UI 上要先选中那一行才会出现删除按钮）。 */
+    async function deleteHistory(n) {
+      try {
+        const json = await postJson(HISTORY_URL, { action: 'delete', n })
+        if (state.data) state.data = { ...state.data, history: Array.isArray(json && json.history) ? json.history : [] }
+        if (state.historyPick === n) state.historyPick = 0
+        const eyes = { ...state.historyEyes }
+        delete eyes[n]
+        state.historyEyes = eyes
+        const models = { ...state.historyModels }
+        delete models[n]
+        state.historyModels = models
+        state.error = null
+        state.notice = '已删除版本 ' + n
         notify()
       } catch (error) {
         state.error = String((error && error.message) || error)
@@ -2645,6 +2957,27 @@ window.__ModuleLoader__.load({
               h('button', { key: 'g6', onClick: () => closeGroup(), style: ghostButton, title: '返回上一层' }, '返回'),
             ]
           : [
+              // ⭐ 复制当前 .drawio 的文件地址：粘到对话里，AI 就能直接读这个文件
+              //    （按钮不叫「复制路径」：面板里「路径」还指节点链路/面包屑，会看串）
+              h('button', {
+                key: 'copyPath',
+                title: '复制当前 .drawio 的文件地址（粘给 AI 就能读）',
+                onClick: () => {
+                  const file = currentDrawioPath()
+                  if (!file) {
+                    state.notice = '这张图还没有落到文件：先在「文件 ▾」里另存为，再复制地址'
+                    notify()
+                    return
+                  }
+                  // 路径里有空格 ⇒ 用 @"..." 形式，DSH 里能直接当文件引用
+                  const target = /\s/.test(file) ? '@"' + file + '"' : file
+                  void copyText(target).then((ok) => {
+                    state.notice = ok ? '已复制文件地址：' + target : '复制没成功，手动抄一下这个地址：' + target
+                    notify()
+                  })
+                },
+                style: { ...ghostButton, height: 24, padding: '0 8px', whiteSpace: 'nowrap' },
+              }, '复制文件地址'),
               drop('fileMenu', '文件 ▾', '打开 / 恢复 / 另存为 / 保存副本', 540,
                 current.filePrompt
                   ? h(FileBrowser, {
@@ -2806,6 +3139,19 @@ window.__ModuleLoader__.load({
 
       const flowEmpty = flowModel && flowModel.items.length === 0
 
+      // 往期历史对照：只把开着「眼睛」、内容已经取到的版本交给画布（进节点组时不叠，坐标不是一套）。
+      // 注意：这里不能用 useMemo —— 它在上面的 `if (!current.open) return null` 之后，
+      // 面板开/关会让 hook 数量变化，React 直接报 #310（Rendered more hooks than during the previous render）。
+      const ghostVersions = (() => {
+        if (group || !data) return []
+        const eyes = current.historyEyes || {}
+        const models = current.historyModels || {}
+        return Object.keys(eyes)
+          .filter((n) => eyes[n] && models[n])
+          .map((n) => ({ n: Number(n), model: models[n] }))
+          .sort((a, b) => a.n - b.n)
+      })()
+
       return h('div',
         {
           style: { position: 'fixed', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.38)', pointerEvents: 'auto' },
@@ -2911,6 +3257,7 @@ window.__ModuleLoader__.load({
                   : h(FlowCanvas, {
                       nodes: shownItems,
                       edges: shownEdges,
+                      ghosts: ghostVersions,
                       positions: layeredPositions || flowModel.positions,
                       selected: current.selected,
                       picked: current.picked || [],
@@ -2984,7 +3331,22 @@ window.__ModuleLoader__.load({
                       onViewport: (center) => { state.viewport = center },
                     }))
               : null,
-            h(Details, {
+            h('div',
+              { style: { width: 258, flex: '0 0 258px', borderLeft: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', flexDirection: 'column', minHeight: 0 } },
+              group
+                ? null
+                : h(HistoryPanel, {
+                    versions: (data && data.history) || [],
+                    eyes: current.historyEyes || {},
+                    pick: current.historyPick || 0,
+                    onPick: (n) => void pickHistory(n),
+                    onToggle: (n) => void toggleHistory(n),
+                    onRestore: (n) => void restoreHistory(n),
+                    onSnapshot: () => void saveSnapshot(),
+                    onDelete: (n) => void deleteHistory(n),
+                  }),
+              h('div', { style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+                h(Details, {
                   item: selectedItem,
                   items: flowModel ? flowModel.items : [],
                   edges: flowModel ? flowModel.edges : [],
@@ -3027,6 +3389,8 @@ window.__ModuleLoader__.load({
                     notify()
                   },
                 }),
+              ),
+            ),
           ),
         ),
       )

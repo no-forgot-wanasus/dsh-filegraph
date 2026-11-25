@@ -4,3 +4,7 @@
 .bak-*/
 *.bak-precompress
 use.drawio
+
+# 非本插件仓库的内容
+anima.drawio
+世界演绎者*

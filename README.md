@@ -5,15 +5,14 @@
 
 面板名、侧栏按钮、locale 都叫 **关系**；包 id 仍是 `@local/dsh-filegraph`（历史 id，profile 里是 link，不改它）。
 
-## 两种视图
+## 只有一张画布
 
-| 视图 | 画什么 | 数据来源 |
-| --- | --- | --- |
-| **关系**（默认） | 人/模型标的节点、关系、节点组 | 当前 `.drawio`（唯一真源） |
-| **全部** | AI 读/写过的文件、窗口、其他来源 | `.graph.json` 里自动记的记录 |
+面板就是**关系画布**（当前 `.drawio` 是唯一真源）：人/模型标的节点、关系、节点组。
+顶部的「全部 ▾」不是另一张图，是这张图的三种筛法：全部 / 此节点关系 / 此节点链路。
 
-AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_image` 记「窗口读入文件」，
-`mcp__*` / `web_*` / `pwsh` / `bash` / `terminal_*` / `see_now` / `browser_*` 记「窗口从某来源取数」。
+`.graph.json` 里另有一层只读的 AI 记录（`write`/`edit` 记「窗口写出文件」，`read`/`read_image` 记「窗口读入文件」，
+`mcp__*` / `web_*` / `pwsh` / `bash` / `terminal_*` / `see_now` / `browser_*` 记「窗口从某来源取数」），
+画布不再展示它 —— 它只是数据和扫描/清理路由的来源。
 
 ## 节点、名字、id
 
@@ -56,7 +55,12 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | Shift + D | 再放一个同名节点 |
 | Ctrl + 左键点线 | 剪掉这一条关系 |
 | Ctrl + 左键拖过线 | 剪刀：划过的线松手一起剪掉 |
-| Ctrl + S / Ctrl + Z | 保存 / 回退一步（回退的是整张图） |
+| `Ctrl + S` / `Ctrl + Z` | 保存 / 回退一步（回退的是整张图） |
+| 历史窗口 · 保存快照 | 手动新增一份快照（名字 `版本 N`；与「保存」分开） |
+| 历史窗口 · 点版本 | 只选中这一行（出现删除按钮），不自动叠对照 |
+| 历史窗口 · 眼睛 | 开/关这个版本的对照叠加 |
+| 历史窗口 · 时钟 | 回到这个版本（先压一步回退栈，可再 Ctrl+Z） |
+| 历史窗口 · 垃圾桶 | 删除这一份快照（先点中那一行才出现） |
 | Esc | 关弹窗 / 退出节点组 / 关面板 |
 | 滚轮 / 右下角按钮 | 缩放（不设上限）/ 适应 |
 | 右键节点 | 打开节点组 / 解散节点组（组）/ 重命名 / 改组名 / 再放一个同名节点 / 删除 |
@@ -66,6 +70,7 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | 右键空白 | 添加节点 / 添加节点组；新对象落在**屏幕中心**，压住已有节点时自动往外找空位 |
 | 左上角路径 | 回到上一层节点组 |
 | 文件 ▾ | 新建 / 打开 / 恢复 / 另存为 / 保存副本 / 导出关系文档 |
+| 工具条「复制文件地址」 | 把当前 `.drawio` 的**文件地址**复制到剪贴板（地址带空格时复制成 `@"..."`），直接粘到对话里 AI 就能读这个文件；还没有落到文件时只提示去另存为 |
 | 全部 ▾ | 全部 / 此节点关系 / 此节点链路 |
 | ⋯ | 加节点 / 加节点组 / 再放同名 / 设置 / 清空这张图 |
 | 组端口名字 | 默认名（输入 / 输入 2）自动补成外面那条线的节点名：入口=上一节点名，出口=默认名；同一根输入加出来的端口与原端口同名；端口始终 n+1（n 条已接 + 1 个空口） |
@@ -81,6 +86,41 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 - 给 AI 读：直接看 `presets/*.json` 与 `presets/README.md`；写图约定是**总项目一条主干线，AI 制作/后期添加挂侧枝，尽量不用循环，要回环就用同名新节点**。
 - 加预设不用改代码：往 `presets/` 放一个 `{id,name,note,main:[{name,verb}],side:[{name,from,verb}]}` 的 json 即可。
 
+## 往期历史（右上窗口）
+
+右侧栏分成上下两块：上面是**历史**，下面是**详情**（详情栏宽度仍是 258px，开合不改变画布缩放）。
+
+- 历史 = **手动文件快照**，与普通「保存」分开：点历史窗口顶部的「保存快照」才留一份，
+  **每点一次新增一份**（名字 `版本 N`）；真源不做自动保存，Ctrl+S / 3 分钟自动保存只写当前 `.drawio`。
+- 每份快照是两个真文件，放在画布旁边的 `<图名> 历史\` 目录：`版本 N.drawio`（人可以直接打开）+
+  `版本 N.graph.json`（含组内部，回滚用）；同目录 `index.json` 是元数据（`versions` + `next`）。
+- 版本号**只增不减**：删掉旧快照后编号也不复用；列表永远按版本号从大到小排，不按时间重排。
+- 列表按版本号**从大到小**排（新的在最上面），列表自己滚轮滚动；没有历史时写「无往期版本」。
+- 点一行 = 只选中（选中后这一行才出现垃圾桶）；**不会**自动往画布上叠对照。
+- 眼睛（对照显示）：把这个版本叠到画布上，只读、不挡操作：
+  旧版本有、现在没有的节点 = 虚线灰框 + 名字（同名不同 id 的节点会各出现一个框）；旧版本有、现在没有的关系 = 虚线灰线；
+  现在有、旧版本没有的节点 = 绿色虚线外框。两端都还在的节点按现在的位置画 —— 看的是结构差异，不是当初的排版。
+- 时钟（回到此版本）：从那份 `.graph.json` 恢复整张图；这一步会先压一步回退栈，所以还能 Ctrl+Z。
+- 垃圾桶（删除快照）：**要先点中那一行**才会出现，删掉该版本的两个文件 + 索引条目。
+
+## 给 AI 读图（读文本，不看图）
+
+- 读图**必须读文件文本**，三种都行：① `.drawio` 的 XML——节点是 `<UserObject label="节点名" note="节点功能描述">`，
+  连线是 `<mxCell value="动作">`；② `.graph.json` 的 `flowNodes` / `flows` / `nodeNotes` / `groups`；
+  ③ 「文件 → 导出关系文档」生成的 `.md`（含「节点说明」一节）。
+- **不能只靠截图 / 渲染出来的图**：节点功能描述只存在 `.drawio` 的 `note`（`UserObject` 属性）里，
+  画布上不显示，识图看不到；只看图会漏掉每个节点"做什么用"。
+- 同名节点共用一份说明（`nodeNotes[名字]`）：读说明按名字查，不是按 id。
+
+## 给 AI 写图的规矩
+
+- **不许改动已有结构**：已有节点的 id / 名字 / 连线 / 动作词 / 端口，一律原样保留；
+  新东西只能是**新增**（新 id），不能为了排得好看去重排、重连、改名或删旧节点。
+- **可以像刀一样切开腾位置**：要往两个节点中间插东西时，把那一段之后的节点**整体**往下/往右平移
+  （同一列/同一行的节点要一起动），腾出空位再放新节点；只移动坐标，不动关系。
+- 写完 `.drawio` 刷新面板：宿主会发现文件变了，把改之前的图压进回退栈（Ctrl+Z 能退回），再接受新结构。
+  想让这一刻以后还能对照 / 回滚，就点一次「保存快照」留成一份文件快照。
+
 ## 文件与数据
 
 - **`.drawio`** 是这份图的文件：节点（id + 名字 + 坐标）、连线（id + 两端 + 动作）、节点组画成蓝色节点。
@@ -89,6 +129,8 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
   默认位置 `<项目>/.filegraph/graph.json`，可在设置里指到别处；写盘是原子写 + `.bak1`。
 - 组内部**不写进 `.drawio`**：`.drawio` 只存顶层画布，组内部只存 `.graph.json`（按组节点 id 关联）。
   换一个 `.drawio` = 换顶层画布；组按 id 保留，找不到对应节点就自动丢弃。
+- **`<图名> 历史\`** 是往期历史目录（跟 `.drawio` 同目录）：每份快照是 `版本 N.drawio` + `版本 N.graph.json`，
+  `index.json` 记 `{versions:[{n,at,nodes,edges,groups}], next}`；删快照会连文件一起删，编号不复用。
 - 设置：`%USERPROFILE%\.dsh\storages\filegraph\settings.json`（`graphFile` / `drawioFile`）。
 
 ## 路由
@@ -111,6 +153,7 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | `/filegraph/position` / `/filegraph/drag` | 画布坐标 / 手拖后的绝对坐标 |
 | `/filegraph/preset` | 工作流预设：`list` 列预设、`apply`（可带 `id`）把模板画进当前图 |
 | `/filegraph/undo` | 回退一步（整图快照栈） |
+| `/filegraph/history` | 往期历史（文件快照）：`list` 列版本 / `snapshot` 手动新增一份（`版本 N`）/ `show` `{n}` 取那一版（对照用）/ `restore` `{n}` 回到那一版（先压回退栈）/ `delete` `{n}` 删文件+索引 |
 | `/filegraph/new` `/filegraph/open` `/filegraph/export` | 文件菜单 |
 | `/filegraph/import` / `/filegraph/export-md` | 导入 `.drawio` / 导出关系文档 |
 | `/filegraph/scan` `/filegraph/prune` `/filegraph/reset` | AI 记录层：扫描 / 清理孤点 / 清空 |
@@ -121,12 +164,15 @@ AI 记录层只读：`write`/`edit` 记「窗口写出文件」，`read`/`read_i
 | 文件 | 负责 |
 | --- | --- |
 | `index.js` | 宿主：AI 记录、`.graph.json` 读写、`.drawio` 解析/生成、全部路由 |
-| `client.js` | 面板：`FlowCanvas`（关系画布，含节点组）、`Details`（节点功能描述 + 输入/输出）、文件菜单 |
+| `client.js` | 面板：`FlowCanvas`（关系画布，含节点组与往期对照叠加）、`HistoryPanel`（右上历史窗口）、`Details`（节点功能描述 + 输入/输出）、文件菜单 |
 | `cordis.patch.yml` | bundle 入口（一条 Host 行） |
 | `locale/*.json` | 面板标题与描述 |
 | `icon.svg` | 侧栏图标 |
-| `tests/smoke-host.mjs` | 全部路由实跑 + 断言（id/同名/节点组/长名/无框） |
-| `tests/smoke-client.mjs` | 用真 React SSR 渲面板（关系视图/组内/详情/全部/菜单/右键菜单） |
+| `tests/smoke-host.mjs` | 全部路由实跑 + 断言（id/同名/节点组/长名/无框/版本号只增不减） |
+| `tests/smoke-client.mjs` | 用真 React SSR 渲面板（关系视图/组内/详情/全部/菜单/右键菜单/历史窗口） |
+| `tests/interaction-history.mjs` | 往期历史交互（点版本取图、眼睛开关、缓存、回到此版本） |
+| `tests/interaction-copypath.mjs` | 工具条「复制文件地址」：普通地址原样复制 / 带空格复制成 `@"..."` / 没有文件只提示 |
+| `tests/interaction-hooks.mjs` | 面板反复关/开不变 hook 数量（防 React #310：hook 不能写在 `if (!current.open) return null` 之后） |
 | `tests/smoke-live.mjs` | 拉正在跑的宿主的真实 `/filegraph/data` 渲一遍面板，确认线上数据不炸 |
 
 ## 测试
@@ -136,6 +182,9 @@ node --check index.js
 node --check client.js
 node tests/smoke-host.mjs
 node tests/smoke-client.mjs "<react 所在 node_modules 目录>"
+node tests/interaction-history.mjs "<react 目录>"
+node tests/interaction-hooks.mjs "<react 目录>"
+node tests/interaction-copypath.mjs "<react 目录>"
 node tests/smoke-live.mjs "<react 目录>" http://127.0.0.1:<当前 GUI 端口>
 ```
 

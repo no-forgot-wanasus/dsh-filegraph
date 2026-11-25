@@ -26,6 +26,7 @@ const IMPORT_ROUTE = '/filegraph/import'
 const OPEN_ROUTE = '/filegraph/open'
 const DRAG_ROUTE = '/filegraph/drag'
 const EXPORT_ROUTE = '/filegraph/export'
+const HISTORY_ROUTE = '/filegraph/history'
 
 const GRAPH_VERSION = 3
 const DEFAULT_DIRNAME = '.filegraph'
@@ -1167,11 +1168,190 @@ async function syncDrawio(current) {
   const parsed = parseDrawio(text)
   // 空文件是合法状态（新建的图就是空的）：只有连 mxCell 都没有时才当成解析失败、保留旧数据
   if (parsed.flows.length === 0 && !/<mxCell/.test(text)) return
+  // 画布文件被外部改过（AI 直接写 .drawio）：先把改之前的图留成一个版本，再接受新结构。
+  // drawioMtime 为 0 表示这次是宿主第一次读这个文件，那是基线，不记版本。
+  const previous = graph.drawioMtime ? JSON.stringify(graph) : ''
   reconcileCanvas(graph, parsed)
+  if (previous && previous !== JSON.stringify(graph)) await pushUndoSnapshot(previous, target.graphFile)
   graph.drawioMtime = info.mtimeMs
   graph.updatedAt = Date.now()
   await flushGraph(entry, target.graphFile)
   return parsed
+}
+
+/* ------------------------------------------------------------ 往期历史
+ * 回退栈 = 往期历史：每一步都是一份整图快照（.drawio 只是它的导出）。
+ * 每条 { n: 版本号, at: 时间, nodes/edges/groups: 计数, graph: JSON 字符串 }。
+ * 版本号只增不减：旧快照被步数上限挤掉时编号不回退，面板里不会出现"同号不同内容"。
+ * 只保留最近 undoDepth 步，超出的一律丢掉、也不落盘，免得文件越滚越大。 */
+const undoStack = new Map()
+const undoFiles = new Map() // graphFile -> 持久化路径
+
+function undoFileFor(graphFile) {
+  if (!undoFiles.has(graphFile)) undoFiles.set(graphFile, graphFile + '.undo.json')
+  return undoFiles.get(graphFile)
+}
+
+/** 老版本把快照存成字符串数组；读的时候补成带版本号的条目。 */
+function undoEntryOf(value, index) {
+  const raw = typeof value === 'string' ? value : value && typeof value.graph === 'string' ? value.graph : ''
+  if (!raw) return null
+  const meta = undoCountsOf(raw)
+  const n = value && typeof value === 'object' && Number(value.n) > 0 ? Math.trunc(Number(value.n)) : index + 1
+  return { n, at: (value && typeof value === 'object' && Number(value.at)) || 0, ...meta, graph: raw }
+}
+
+function undoCountsOf(snapshot) {
+  try {
+    const graph = JSON.parse(snapshot)
+    return {
+      nodes: Array.isArray(graph.flowNodes) ? graph.flowNodes.length : 0,
+      edges: Array.isArray(graph.flows) ? graph.flows.length : 0,
+      groups: graph.groups && typeof graph.groups === 'object' ? Object.keys(graph.groups).length : 0,
+    }
+  } catch {
+    return { nodes: 0, edges: 0, groups: 0 }
+  }
+}
+
+async function loadUndo(graphFile) {
+  if (undoStack.has(graphFile)) return
+  try {
+    const raw = JSON.parse(await fsp.readFile(undoFileFor(graphFile), 'utf8'))
+    const list = (Array.isArray(raw) ? raw : []).map(undoEntryOf).filter(Boolean)
+    const depth = clampUndoDepth(state && state.undoDepth)
+    undoStack.set(graphFile, list.slice(-depth))
+  } catch {
+    undoStack.set(graphFile, [])
+  }
+}
+
+const undoTimers = new Map()
+const undoWriting = new Map() // graphFile -> 串行写盘（并发写会互相覆盖）
+function saveUndoNow(graphFile) {
+  const stack = (undoStack.get(graphFile) || []).slice()
+  const prev = undoWriting.get(graphFile) || Promise.resolve()
+  const next = prev
+    .then(() => (stack.length > 0 ? writeJsonAtomic(undoFileFor(graphFile), stack) : Promise.resolve()))
+    .catch(() => {})
+  undoWriting.set(graphFile, next)
+  return next
+}
+function saveUndoSoon(graphFile) {
+  if (undoTimers.has(graphFile)) return
+  const timer = setTimeout(() => {
+    undoTimers.delete(graphFile)
+    void saveUndoNow(graphFile)
+  }, 1200)
+  if (timer && typeof timer.unref === 'function') timer.unref()
+  undoTimers.set(graphFile, timer)
+}
+
+/** 直接存一份已经序列化好的快照（外部改画布时用：改之前的那份）。 */
+async function pushUndoSnapshot(snapshot, graphFile) {
+  await loadUndo(graphFile)
+  const depth = clampUndoDepth(state && state.undoDepth)
+  const stack = undoStack.get(graphFile) || []
+  const last = stack[stack.length - 1]
+  stack.push({
+    n: last ? (Number(last.n) || 0) + 1 : 1,
+    at: Date.now(),
+    ...undoCountsOf(snapshot),
+    graph: snapshot,
+  })
+  while (stack.length > depth) stack.shift()
+  undoStack.set(graphFile, stack)
+  saveUndoSoon(graphFile)
+  return stack[stack.length - 1]
+}
+
+async function snapshotGraph(graph, graphFile) {
+  return pushUndoSnapshot(JSON.stringify(graph), graphFile)
+}
+
+/* 往期历史 = 手动保存的**文件快照**（不是回退栈，也不自动生成）：每个快照是一份真文件，
+ * 放在画布文件旁边的「<图名> 历史\」目录里：`版本 N.drawio`（人可打开）+ `版本 N.graph.json`（含组内部，回滚用）。
+ * `index.json` 只存元数据（versions + next）。普通「保存」只写当前 .drawio，不产生快照。 */
+const HISTORY_DIR_SUFFIX = ' 历史'
+
+function drawioPathOf(current, active) {
+  const configured = current && typeof current.drawioFile === 'string' ? current.drawioFile.trim() : ''
+  return configured || path.join(active.root, '项目关系图.drawio')
+}
+
+function historyDirOf(current, active) {
+  const drawio = drawioPathOf(current, active)
+  const stem = path.basename(drawio).replace(/\.[^.]+$/, '')
+  return path.join(path.dirname(drawio), stem + HISTORY_DIR_SUFFIX)
+}
+
+function historyIndexPath(dir) {
+  return path.join(dir, 'index.json')
+}
+
+/** 快照文件名一律「版本 N」。 */
+function snapshotGraphPath(dir, n) {
+  return path.join(dir, '版本 ' + n + '.graph.json')
+}
+
+function snapshotDrawioPath(dir, n) {
+  return path.join(dir, '版本 ' + n + '.drawio')
+}
+
+/** 读 index.json：versions 是快照列表，next 是下一个编号（删了旧快照也不复用旧号）。 */
+async function readHistoryIndexFile(dir) {
+  try {
+    const raw = JSON.parse(await fsp.readFile(historyIndexPath(dir), 'utf8'))
+    const list = raw && Array.isArray(raw.versions) ? raw.versions : []
+    const versions = list
+      .filter((item) => item && Number(item.n) > 0)
+      .map((item) => ({
+        n: Math.trunc(Number(item.n)),
+        at: Number(item.at) || 0,
+        nodes: Number(item.nodes) || 0,
+        edges: Number(item.edges) || 0,
+        groups: Number(item.groups) || 0,
+      }))
+      .sort((a, b) => a.n - b.n)
+    const maxN = versions.reduce((max, item) => Math.max(max, item.n), 0)
+    const next = Math.max(Number(raw && raw.next) || 0, maxN + 1)
+    return { versions, next }
+  } catch {
+    return { versions: [], next: 1 }
+  }
+}
+
+async function readHistoryIndex(dir) {
+  return (await readHistoryIndexFile(dir)).versions
+}
+
+async function writeHistoryIndex(dir, versions, next) {
+  await fsp.mkdir(dir, { recursive: true })
+  const maxN = (versions || []).reduce((max, item) => Math.max(max, Number(item.n) || 0), 0)
+  await writeJsonAtomic(historyIndexPath(dir), { versions, next: Math.max(Number(next) || 0, maxN + 1) })
+}
+
+async function historyMetaOfDir(dir) {
+  return readHistoryIndex(dir)
+}
+
+function snapshotCountsOf(graph) {
+  return {
+    nodes: (graph.flowNodes || []).length,
+    edges: (graph.flows || []).length,
+    groups: Object.keys(graph.groups || {}).length,
+  }
+}
+
+/** 一份快照 = 两个真文件：可打开的 .drawio + 含组内部的 .graph.json。 */
+async function writeSnapshotFiles(dir, n, graph) {
+  await fsp.mkdir(dir, { recursive: true })
+  await writeJsonAtomic(snapshotGraphPath(dir, n), graph)
+  await fsp.writeFile(
+    snapshotDrawioPath(dir, n),
+    buildDrawio(graph.flowNodes || [], graph.flows || [], graph.flowPositions || {}, graph.groups || {}, graph.nodeNotes || {}),
+    'utf8',
+  )
 }
 
 async function payloadFor(current, root) {
@@ -1187,6 +1367,7 @@ async function payloadFor(current, root) {
       edges: [],
       windows: [],
       sources: [],
+      history: [],
       settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '', undoDepth: current.undoDepth ?? UNDO_DEFAULT },
     }
   }
@@ -1210,6 +1391,7 @@ async function payloadFor(current, root) {
     nodeNames: (graph.flowNodes ?? []).map((node) => node.name),
     nodeNotes: graph.nodeNotes ?? {},
     groups: graph.groups ?? {},
+    history: await historyMetaOfDir(historyDirOf(current, active)),
     settings: { graphFile: current.graphFile, drawioFile: current.drawioFile ?? '', undoDepth: current.undoDepth ?? UNDO_DEFAULT },
   }
 }
@@ -1505,60 +1687,6 @@ export function apply(ctx, config = {}) {
     } catch {
       graph.drawioMtime = 0
     }
-  }
-
-  /* 回退栈：整份图快照（.drawio 只是它的导出，所以回退也照快照重建）。
-   * 只保留最近 undoDepth 步，超出的一律丢掉、也不落盘，免得文件越滚越大。 */
-  const undoStack = new Map()
-  const undoFiles = new Map() // graphFile -> 持久化路径
-
-  function undoFileFor(graphFile) {
-    if (!undoFiles.has(graphFile)) undoFiles.set(graphFile, graphFile + '.undo.json')
-    return undoFiles.get(graphFile)
-  }
-
-  async function loadUndo(graphFile) {
-    if (undoStack.has(graphFile)) return
-    try {
-      const raw = JSON.parse(await fsp.readFile(undoFileFor(graphFile), 'utf8'))
-      const list = Array.isArray(raw) ? raw.filter((item) => typeof item === 'string') : []
-      const depth = clampUndoDepth(state && state.undoDepth)
-      undoStack.set(graphFile, list.slice(-depth))
-    } catch {
-      undoStack.set(graphFile, [])
-    }
-  }
-
-  const undoTimers = new Map()
-  const undoWriting = new Map() // graphFile -> 串行写盘（并发写会互相覆盖）
-  function saveUndoNow(graphFile) {
-    const stack = (undoStack.get(graphFile) || []).slice()
-    const prev = undoWriting.get(graphFile) || Promise.resolve()
-    const next = prev
-      .then(() => (stack.length > 0 ? writeJsonAtomic(undoFileFor(graphFile), stack) : Promise.resolve()))
-      .catch(() => {})
-    undoWriting.set(graphFile, next)
-    return next
-  }
-  function saveUndoSoon(graphFile) {
-    if (undoTimers.has(graphFile)) return
-    const timer = setTimeout(() => {
-      undoTimers.delete(graphFile)
-      void saveUndoNow(graphFile)
-    }, 1200)
-    if (timer && typeof timer.unref === 'function') timer.unref()
-    undoTimers.set(graphFile, timer)
-  }
-
-  async function snapshotGraph(graph, graphFile) {
-    await loadUndo(graphFile)
-    const depth = clampUndoDepth(state && state.undoDepth)
-    const stack = undoStack.get(graphFile) || []
-    stack.push(JSON.stringify(graph))
-    // 超过可回退步数的旧快照直接丢掉：不留在内存，也不写进文件
-    while (stack.length > depth) stack.shift()
-    undoStack.set(graphFile, stack)
-    saveUndoSoon(graphFile)
   }
 
   /* 位置矢量只存一份（绝对坐标），动一次先记内存：保存 / 退出 / 每 3 分钟才落盘。 */
@@ -2185,7 +2313,7 @@ export function apply(ctx, config = {}) {
     const entry = await graphFor(graphFile, rows[0].root)
     // 还没落盘的拖位置先丢掉（它会被快照一起盖掉）
     canvasDirty.delete(graphFile)
-    const snapshot = JSON.parse(stack.pop())
+    const snapshot = JSON.parse(stack.pop().graph)
     for (const key of Object.keys(entry.graph)) delete entry.graph[key]
     Object.assign(entry.graph, snapshot)
     entry.graph.drawioMtime = 0
@@ -2193,6 +2321,79 @@ export function apply(ctx, config = {}) {
     await flushGraph(entry, graphFile)
     saveUndoSoon(graphFile)
     sendJson(res, 200, { ok: true, undone: true, left: stack.length, ...(await payloadFor(current, rows[0].root)) })
+  })
+
+  /* 往期历史（文件快照）：只有手动一条路子——点「保存快照」才存，每点一次新增一份「版本 N」。
+   * 真源不做自动保存，普通「保存」只写正在用的 .drawio，不碰快照。
+   * 快照是真文件：`<图名> 历史\版本 N.drawio` + `.graph.json`。 */
+  postRoute(HISTORY_ROUTE, async (req, res, body) => {
+    const current = await ensureState()
+    const active = projectRows(current)[0]
+    if (!active) return fail(res, 'no active project')
+    const graphFile = active.graphFile
+    const dir = historyDirOf(current, active)
+    const action = String(body.action || 'list')
+    const entry = await graphFor(graphFile, active.root)
+
+    if (action === 'list') {
+      sendJson(res, 200, { ok: true, history: await historyMetaOfDir(dir) })
+      return
+    }
+
+    if (action === 'snapshot') {
+      // 只多存一份快照文件，**不写**正在用的 .drawio（那是「保存」的事）
+      const { versions, next } = await readHistoryIndexFile(dir)
+      const n = next
+      const record = { n, at: Date.now(), ...snapshotCountsOf(entry.graph) }
+      await writeSnapshotFiles(dir, n, entry.graph)
+      await writeHistoryIndex(dir, versions.concat([record]), n + 1)
+      sendJson(res, 200, { ok: true, snapshot: record, history: await historyMetaOfDir(dir) })
+      return
+    }
+
+    const n = Math.trunc(Number(body.n))
+    const { versions, next } = await readHistoryIndexFile(dir)
+    const meta = versions.find((item) => item.n === n)
+    if (action === 'delete') {
+      if (!meta) return fail(res, '这个快照已经不在了')
+      await fsp.rm(snapshotGraphPath(dir, n), { force: true }).catch(() => {})
+      await fsp.rm(snapshotDrawioPath(dir, n), { force: true }).catch(() => {})
+      await writeHistoryIndex(dir, versions.filter((item) => item.n !== n), next)
+      sendJson(res, 200, { ok: true, deleted: n, history: await historyMetaOfDir(dir) })
+      return
+    }
+
+    let snapshot = null
+    try {
+      snapshot = JSON.parse(await fsp.readFile(snapshotGraphPath(dir, n), 'utf8'))
+    } catch {
+      return fail(res, '这个快照读不出来')
+    }
+    if (action === 'show') {
+      sendJson(res, 200, {
+        ok: true,
+        version: {
+          n,
+          at: meta ? meta.at : 0,
+          flowNodes: snapshot.flowNodes ?? [],
+          flows: snapshot.flows ?? [],
+          flowPositions: snapshot.flowPositions ?? {},
+          groups: snapshot.groups ?? {},
+          nodeNotes: snapshot.nodeNotes ?? {},
+        },
+      })
+      return
+    }
+    if (action !== 'restore') return fail(res, 'unknown action')
+    // 回滚本身也要能 Ctrl+Z 回来：先给"现在"留一步（推翻不了手动快照，只进回退栈）
+    await snapshotGraph(entry.graph, graphFile)
+    canvasDirty.delete(graphFile)
+    for (const key of Object.keys(entry.graph)) delete entry.graph[key]
+    Object.assign(entry.graph, snapshot)
+    entry.graph.drawioMtime = 0
+    await writeCanvas(entry.graph, current, active)
+    await flushGraph(entry, graphFile)
+    sendJson(res, 200, { ok: true, restored: n, ...(await payloadFor(current, active.root)) })
   })
 
   /* 工作流预设：presets/*.json（点一下画一套模板；AI 也可直接读这些文件） */

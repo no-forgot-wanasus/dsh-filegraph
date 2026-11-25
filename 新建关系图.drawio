@@ -2,19 +2,9 @@
 <mxfile host="filegraph"><diagram id="fg" name="关系"><mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root>
 <mxCell id="0"/>
 <mxCell id="1" parent="0"/>
-<mxCell id="n57" value="需求" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="80" y="140" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n58" value="设计" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="320" y="140" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n59" value="制作" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="561" y="140" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n60" value="检查" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="811" y="141" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n61" value="交付" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="1124" y="201" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n62" value="参考素材" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="360" y="320" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n63" value="AI 生成" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="600" y="416" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="n64" value="修订" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="840" y="512" width="170" height="48" as="geometry"/></mxCell>
-<mxCell id="fe32" value="定下" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n57" target="n58"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe33" value="按图做" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n58" target="n59"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe34" value="验一遍" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n59" target="n60"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe35" value="交出" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n60" target="n61"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe36" value="取数" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n58" target="n62"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe37" value="写到" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n59" target="n63"><mxGeometry relative="1" as="geometry"/></mxCell>
-<mxCell id="fe38" value="回改" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n60" target="n64"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="n57" value="是否有历史文件" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="80" y="140" width="170" height="48" as="geometry"/></mxCell>
+<mxCell id="n65" value="显示“无往期版本”" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="358" y="187" width="170" height="48" as="geometry"/></mxCell>
+<UserObject id="n66" label="排列版本" note="按照编号大小，从上往下，从大往小依次排列。"><mxCell style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="358" y="98" width="170" height="48" as="geometry"/></mxCell></UserObject>
+<mxCell id="fe39" value="是" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n57" target="n66"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="fe40" value="否" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="n57" target="n65"><mxGeometry relative="1" as="geometry"/></mxCell>
 </root></mxGraphModel></diagram></mxfile>
